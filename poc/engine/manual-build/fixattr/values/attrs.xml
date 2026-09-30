@@ -1,0 +1,4 @@
+<resources>
+    <!-- build-workaround: appcompat 1.2.0 color selectors reference app:alpha but the AAR ships no such attr; declared here so aapt2 can link (matches framework float semantics) -->
+    <attr name="alpha" format="float" />
+</resources>

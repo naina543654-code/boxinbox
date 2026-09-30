@@ -1,0 +1,32 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace 'com.sandboxpoc.probe'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.sandboxpoc.probe'
+        minSdk 33
+        targetSdk 35
+        versionCode 1
+        versionName '1.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+        debug {
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    // For GoogleApiAvailability availability-code check only.
+    implementation 'com.google.android.gms:play-services-base:18.5.0'
+}
