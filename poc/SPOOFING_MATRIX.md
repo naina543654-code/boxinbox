@@ -1,0 +1,79 @@
+# Spoofing Matrix — PoC v2
+
+**Builds:** `apks/host-runtime-poc-v2.apk` (`com.sandboxpoc.hostruntime`),
+`apks/probe-v2.apk` (`com.sandboxpoc.probe`).
+**Engine:** zitanioi/blackbox @ `c994edf` + PoC spoof patches (see below).
+
+**Capability states:**
+- **Supported** — enforced in code on the guest path; on-device behavior still
+  needs Jason's device test (nothing here is claimed from a device run).
+- **Partially Supported** — enforced on some paths; a known path leaks the
+  host value. Never silent: the leak is documented, not hidden.
+- **Experimental** — enforced via a mechanism that is version-fragile or
+  fail-open (Pine ART hooks); works when the hook lands, passes through when
+  it doesn't.
+- **Unsupported** — deliberately not built; the precise blocker is documented.
+- **Host Provided** — intentionally left as the host value by design (spoofing
+  it would break the runtime).
+
+**Rule (no silent fallback):** when no valid spoof profile is active, every
+hook passes through or keeps the engine's legacy behavior — the guest is
+never told a host value is virtual.
+
+---
+
+## Profile generation (host side, engine-independent)
+
+| Feature | State | Enforcement path | Probe verification | Device test |
+|---|---|---|---|---|
+| Coherent device profile (manufacturer↔brand↔model↔fingerprint↔board/hardware/patch) | Supported | `host-runtime/.../profile/DeviceProfile.kt` — 14 curated rows (10× Android 14 + Pixel 8/15, Pixel 9/15, Galaxy S24/15, Pixel 9/16); row picked with `apiLevel == Build.VERSION.SDK_INT`, else nearest | ProbeV2 Build rows: PASS = observed exactly equals the row | Confirm the picked row matches the device's API on-device |
+| Fresh Android ID per identity (16 hex) | Supported | `identity/ProfileGenerator.kt` `newAndroidId()`; persisted with the identity and written to `profiles/active_profile.json` | ProbeV2 ANDROID_ID row | Generate → note ID; Reset → ID must differ |
+| Fresh telephony IDs per identity (deviceId 16 hex, subscriberId 15 digits) | Supported | `ProfileGenerator.kt` | ProbeV2 telephony rows | Same reset-differs check |
+| Profile persistence + lifecycle | Supported | `profile/ProfileStore.kt` → `<filesDir>/profiles/active_profile.json` (+ `profile.json` copy); save on generate/reset, delete on identity delete (`identity/IdentityManager.kt`) | n/a (host-side) | Inspect via `adb run-as` or host log; engine reads the same file |
+| Expected→guest delivery for the probe | Supported | `BlackBoxRuntime.stageExpectedProfile()` writes `expected_profile.json` into the guest's virtual files dir (`BEnvironment.getDataFilesDir(pkg, 0)`); engine redirects guest `getFilesDir()` there | ProbeV2 prints "expected_profile loaded from staged file" when the fallback is used | Launch probe from Manage Identity → comparison rows must not be UNKNOWN |
+
+## Engine spoof hooks (guest processes)
+
+| Feature | State | Enforcement path | Probe verification | Device test |
+|---|---|---|---|---|
+| `Build` fields (MANUFACTURER, BRAND, MODEL, DEVICE, PRODUCT, FINGERPRINT, ID, TAGS, TYPE, BOARD, HARDWARE) | Supported | `fake/spoof/BSpoofManager.applyBuildSpoofing()` — reflection strips `final` on the statics, called at the top of `HookManager.init()` (earliest per-process point, guest processes only) | ProbeV2 Build rows compare against profile `device.*` | PASS on all 11 rows on-device |
+| `Build.VERSION.RELEASE` / `SDK_INT` | Host Provided | Deliberately NOT spoofed — these drive the real in-process framework; spoofing them destabilizes the runtime | ProbeV2 reports them as INFO, never PASS/FAIL | n/a |
+| `Build.getSerial()` | Partially Supported | Static-field patch covers the Java field; the native `ro.serialno` read path is untouched | ProbeV2 does not assert serial | Note serial behavior on-device |
+| Android ID (`Settings.Secure.ANDROID_ID`) | Supported | `fake/service/context/providers/SystemProviderStub.trySpoofAndroidId()` — intercepts `query()` (NameValueCache path) and `call()` (GET_secure path) for `android_id`, returns a one-row cursor / Bundle with the profile value | ProbeV2 ANDROID_ID row | Must PASS; compare with standalone probe (host value) |
+| Telephony IDs (deviceId/IMEI/MEID/subscriberId) | Supported | `fake/service/ITelephonyManagerProxy` — `getDeviceId`, `getImeiForSlot`, `getMeidForSlot`, `getDeviceIdWithFeature` → profile `telephony.deviceId`; `getSubscriberId` → profile `telephony.subscriberId`. Platform note: on API 33+ the IMEI/MEID getters need privileged permission; the proxy returns profile values whenever invoked | ProbeV2 telephony rows (device/subscriber not directly readable by the probe without permission — INFO/UNKNOWN) | Verify no SecurityException crash on launch |
+| Telephony operator (name, numeric, countryIso, SIM operator/name/iso) | Supported | Same proxy — new hooks `getNetworkOperatorName`, `getSimOperator`, `getSimOperatorName`, `getSimCountryIso`, `getNetworkCountryIso`; `getNetworkOperator` changed from passthrough to profile `operatorNumeric` | ProbeV2 telephony rows: name/iso case-insensitive, numeric exact | PASS when cellular info is available; UNKNOWN (not FAIL) when the device reports nothing |
+| Inactive-profile telephony fallback | Host Provided / legacy | Device/subscriber-ID getters keep the engine's legacy constant `md5(hostPkg)` fake when no profile is active — genuine passthrough would crash (SecurityException, API 33+) or leak the real IMEI. Operator/country and Wi-Fi DO genuine passthrough when inactive | n/a | n/a |
+| Wi-Fi SSID / BSSID (visible identity) | Supported | `fake/service/IWifiManagerProxy.getConnectionInfo` — sets profile SSID/BSSID via the existing `BRWifiInfo`/`BRWifiSsid` reflection pattern; replaces the old hardcoded `BlackBox_Wifi` / `ac:62:5a:82:65:c4` constants | ProbeV2 WiFi rows: SSID exact (profile stores it quoted, as Android reports), BSSID case-insensitive; `<unknown ssid>` / `02:00:00:00:00:00` (OS-masked) → UNKNOWN | PASS when connected; UNKNOWN (not FAIL) when disconnected or location permission is denied |
+| Network transport / routing | Host Provided | `IConnectivityManagerProxy` untouched by design — guest keeps real internet on the host UID; only the *visible* Wi-Fi identity is spoofed | ProbeV2 transport row is INFO | Confirm guest internet works |
+| Location (`getLastKnownLocation`, `getLastLocation`) | Supported | `fake/spoof/BSpoofLocation.ensureSeeded()` called at the top of the `getLastLocation` / `getLastKnownLocation` / `requestLocationUpdates` hooks in `fake/service/ILocationManagerProxy`; seeds a `BLocation` from profile lat/long/altitude/accuracy into `BLocationManager` with `OWN_MODE` (per-guest) when `isSpoofActive()`; clears the seed when inactive so calls pass through | ProbeV2 location row: PASS iff \|Δlat\|, \|Δlon\| ≤ 1e-4 (~11 m); accuracy PASS iff \|Δ\| ≤ max(10 m, 50% of expected) | Grant location permission to the guest probe; expect PASS |
+| Location movement simulation | Supported | Same class — daemon 2 s tick advances each seeded fix by `speed × dt` along `bearing` (profile `movement`, default disabled, 1.4 m/s @ 90°); propagates to `requestLocationUpdates` listeners through the engine's existing listener loop | ProbeV2 movement check: two samples ~10 s apart, reports moved distance (INFO) | Enable movement in a profile and watch the distance grow |
+| Sensors (`getSensorList`, `getDefaultSensor` visibility) | Experimental | `fake/spoof/BSpoofSensors` — Pine ART hooks on `SensorManager.getSensorList(int)` / `getDefaultSensor(int[, boolean])` filter to `BSpoofManager.getSensorTypes()`; fail-open (hook failure / inactive spoof / empty list → passthrough). Pine is process-wide but injectors run in guest processes only | ProbeV2 sensor row: PASS only on exact type-set equality; lists missing/unexpected type ints | PASS if Pine hooks land on the device's ART; if rows show extra host sensors, the hook didn't land — report it |
+| Sensor live readings (`registerListener` + synthetic `SensorEvent`s) | Unsupported | Deliberate: `android.hardware.SensorEvent` has no public constructor; faking readings needs hidden-constructor reflection + version-fragile field injection across 6+ `registerListener` overloads. Visibility filtering (above) covers the profile contract | n/a | n/a |
+| Package visibility (`getInstalledPackages`, `getInstalledApplications`, …) | Supported | Already virtual-only in the engine (`BPackageManagerService`); audited, no change needed | ProbeV2 packages section is INFO (count + first 20 names) — manual guest-isolation review | Confirm host apps are NOT listed |
+| `queryIntentActivities` | Supported | **Gap found and fixed:** was unhooked, so guests hit the real PMS and could enumerate host activities. New `@ProxyMethod("queryIntentActivities")` in `fake/service/IPackageManagerProxy` serves only the virtual package list, no real-PMS fallback | Same INFO section | Same review |
+| `resolveIntent` / `resolveService` single-target fallback | Host Provided | Kept deliberately: falls back to the real PMS when the virtual PM returns null (host-passthrough-app design). Single-target resolution, not enumeration | n/a | n/a |
+
+## What this PoC does NOT do (out of scope, unchanged)
+
+- Full 13-module V1 app, multi-identity, UI polish — gated on the runtime
+  verdict and Jason's approval.
+- `Build.VERSION.*` spoofing, `Build.getSerial()` native path, synthetic
+  sensor readings, VPN network mode — documented above.
+- Undetectability claims: the probe measures guest-observed values;
+  configuration alone is not proof, and no complete anti-detection is promised.
+
+## File map (source of truth)
+
+- Host: `poc/host-runtime/app/src/main/kotlin/com/sandboxpoc/hostruntime/`
+  (`profile/`, `identity/`, `runtime/BlackBoxRuntime.kt`, `ui/ManageIdentityActivity.kt`)
+- Engine spoof: `poc/engines/zitanioi-blackbox/Bcore/src/main/java/top/niunaijun/blackbox/fake/spoof/`
+  (`BSpoofManager.java`, `BSpoofLocation.java`, `BSpoofSensors.java`, `SensorSpoofInjector.java`)
+- Engine hook edits: `fake/hook/HookManager.java`,
+  `fake/service/ITelephonyManagerProxy.java`,
+  `fake/service/IWifiManagerProxy.java`,
+  `fake/service/IPackageManagerProxy.java`,
+  `fake/service/ILocationManagerProxy.java`,
+  `fake/service/context/providers/SystemProviderStub.java`,
+  `entity/location/BLocation.java` (parcel field-order bug fix)
+- Probe: `poc/probe/app/src/main/java/com/sandboxpoc/probe/MainActivity.java`
+  (ProbeV2 section), `AndroidManifest.xml` (`ACCESS_WIFI_STATE`)

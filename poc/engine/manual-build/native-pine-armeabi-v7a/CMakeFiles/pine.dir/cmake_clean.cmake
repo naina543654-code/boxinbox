@@ -1,0 +1,42 @@
+file(REMOVE_RECURSE
+  "CMakeFiles/pine.dir/android.cpp.o"
+  "CMakeFiles/pine.dir/android.cpp.o.d"
+  "CMakeFiles/pine.dir/art/art_method.cpp.o"
+  "CMakeFiles/pine.dir/art/art_method.cpp.o.d"
+  "CMakeFiles/pine.dir/art/jit.cpp.o"
+  "CMakeFiles/pine.dir/art/jit.cpp.o.d"
+  "CMakeFiles/pine.dir/art/thread.cpp.o"
+  "CMakeFiles/pine.dir/art/thread.cpp.o.d"
+  "CMakeFiles/pine.dir/external/xz-embedded/linux/lib/xz/xz_crc32.c.o"
+  "CMakeFiles/pine.dir/external/xz-embedded/linux/lib/xz/xz_crc32.c.o.d"
+  "CMakeFiles/pine.dir/external/xz-embedded/linux/lib/xz/xz_dec_lzma2.c.o"
+  "CMakeFiles/pine.dir/external/xz-embedded/linux/lib/xz/xz_dec_lzma2.c.o.d"
+  "CMakeFiles/pine.dir/external/xz-embedded/linux/lib/xz/xz_dec_stream.c.o"
+  "CMakeFiles/pine.dir/external/xz-embedded/linux/lib/xz/xz_dec_stream.c.o.d"
+  "CMakeFiles/pine.dir/jni_bridge.cpp.o"
+  "CMakeFiles/pine.dir/jni_bridge.cpp.o.d"
+  "CMakeFiles/pine.dir/pine.cpp.o"
+  "CMakeFiles/pine.dir/pine.cpp.o.d"
+  "CMakeFiles/pine.dir/ruler.cpp.o"
+  "CMakeFiles/pine.dir/ruler.cpp.o.d"
+  "CMakeFiles/pine.dir/trampoline/arch/thumb2.S.o"
+  "CMakeFiles/pine.dir/trampoline/arch/thumb2.cpp.o"
+  "CMakeFiles/pine.dir/trampoline/arch/thumb2.cpp.o.d"
+  "CMakeFiles/pine.dir/trampoline/trampoline_installer.cpp.o"
+  "CMakeFiles/pine.dir/trampoline/trampoline_installer.cpp.o.d"
+  "CMakeFiles/pine.dir/utils/elf_image.cpp.o"
+  "CMakeFiles/pine.dir/utils/elf_image.cpp.o.d"
+  "CMakeFiles/pine.dir/utils/memory.cpp.o"
+  "CMakeFiles/pine.dir/utils/memory.cpp.o.d"
+  "CMakeFiles/pine.dir/utils/scoped_memory_access_protection.cpp.o"
+  "CMakeFiles/pine.dir/utils/scoped_memory_access_protection.cpp.o.d"
+  "CMakeFiles/pine.dir/utils/well_known_classes.cpp.o"
+  "CMakeFiles/pine.dir/utils/well_known_classes.cpp.o.d"
+  "libpine.pdb"
+  "libpine.so"
+)
+
+# Per-language clean rules from dependency scanning.
+foreach(lang ASM C CXX)
+  include(CMakeFiles/pine.dir/cmake_clean_${lang}.cmake OPTIONAL)
+endforeach()

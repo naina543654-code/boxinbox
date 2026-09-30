@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.sandboxpoc.hostruntime">
+
+    <!-- App picker needs visibility of launchable apps. The <queries> element
+         covers this on API 30+ without QUERY_ALL_PACKAGES. The future engine
+         adapter may require additional permissions — see INTEGRATION.md. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".SandboxApp"
+        android:label="Sandbox PoC (Runtime)"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        android:allowBackup="false"
+        android:supportsRtl="true">
+
+        <activity
+            android:name=".ui.HomeActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".ui.ManageIdentityActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.SettingsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.AppPickerActivity"
+            android:exported="false" />
+
+    </application>
+</manifest>

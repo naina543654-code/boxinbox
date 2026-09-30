@@ -1,0 +1,4 @@
+<resources>
+    <!-- build-workaround: appcompat 1.2.0 color/abc_tint_*.xml reference app:alpha but the AAR ships no such attr; declared here with framework float semantics so aapt2 can link -->
+    <attr name="alpha" format="float" />
+</resources>

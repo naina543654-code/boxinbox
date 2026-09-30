@@ -1,0 +1,81 @@
+[  5%] Building CXX object CMakeFiles/pine.dir/ruler.cpp.o
+[ 11%] Building CXX object CMakeFiles/pine.dir/pine.cpp.o
+[ 16%] Building CXX object CMakeFiles/pine.dir/android.cpp.o
+In file included from /home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/pine-core/src/main/cpp/pine.cpp:16:
+/home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/pine-core/src/main/cpp/trampoline/trampoline_installer.h:29:50: warning: field 'kSkipBytes' will be initialized after field 'kReplacementModeOnly' [-Wreorder-ctor]
+   29 |         TrampolineInstaller(size_t skip_bytes) : kSkipBytes(skip_bytes), kReplacementModeOnly(false) {
+      |                                                  ^~~~~~~~~~~~~~~~~~~~~~  ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      |                                                  kReplacementModeOnly(false) kSkipBytes(skip_bytes)
+/home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/pine-core/src/main/cpp/trampoline/trampoline_installer.h:32:73: warning: field 'kSkipBytes' will be initialized after field 'kReplacementModeOnly' [-Wreorder-ctor]
+   32 |         TrampolineInstaller(size_t skip_bytes, bool replacement_only) : kSkipBytes(skip_bytes), kReplacementModeOnly(replacement_only) {
+      |                                                                         ^~~~~~~~~~~~~~~~~~~~~~  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      |                                                                         kReplacementModeOnly(replacement_only) kSkipBytes(skip_bytes)
+In file included from /home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/pine-core/src/main/cpp/android.cpp:13:
+/home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/pine-core/src/main/cpp/trampoline/trampoline_installer.h:29:50: warning: field 'kSkipBytes' will be initialized after field 'kReplacementModeOnly' [-Wreorder-ctor]
+   29 |         TrampolineInstaller(size_t skip_bytes) : kSkipBytes(skip_bytes), kReplacementModeOnly(false) {
+      |                                                  ^~~~~~~~~~~~~~~~~~~~~~  ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      |                                                  kReplacementModeOnly(false) kSkipBytes(skip_bytes)
+/home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/pine-core/src/main/cpp/trampoline/trampoline_installer.h:32:73: warning: field 'kSkipBytes' will be initialized after field 'kReplacementModeOnly' [-Wreorder-ctor]
+   32 |         TrampolineInstaller(size_t skip_bytes, bool replacement_only) : kSkipBytes(skip_bytes), kReplacementModeOnly(replacement_only) {
+      |                                                                         ^~~~~~~~~~~~~~~~~~~~~~  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      |                                                                         kReplacementModeOnly(replacement_only) kSkipBytes(skip_bytes)
+/home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/pine-core/src/main/cpp/android.cpp:119:9: warning: unknown pragma ignored [-Wunknown-pragmas]
+  119 | #pragma ide diagnostic ignored "cppcoreguidelines-macro-usage"
+      |         ^
+/home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/pine-core/src/main/cpp/pine.cpp:445:9: warning: unknown pragma ignored [-Wunknown-pragmas]
+  445 | #pragma ide diagnostic ignored "OCSimplifyInspection"
+      |         ^
+/home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/pine-core/src/main/cpp/pine.cpp:22:23: warning: unused variable 'kArchArm64' [-Wunused-const-variable]
+   22 | static constexpr jint kArchArm64 = 2;
+      |                       ^~~~~~~~~~
+/home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/pine-core/src/main/cpp/pine.cpp:23:23: warning: unused variable 'kArchX86' [-Wunused-const-variable]
+   23 | static constexpr jint kArchX86 = 3;
+      |                       ^~~~~~~~
+3 warnings generated.
+[ 22%] Building CXX object CMakeFiles/pine.dir/jni_bridge.cpp.o
+/home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/pine-core/src/main/cpp/jni_bridge.cpp:9:35: warning: unused parameter 'reserved' [-Wunused-parameter]
+    9 | jint JNI_OnLoad(JavaVM* vm, void* reserved) {
+      |                                   ^
+1 warning generated.
+[ 27%] Building CXX object CMakeFiles/pine.dir/art/art_method.cpp.o
+5 warnings generated.
+[ 33%] Building CXX object CMakeFiles/pine.dir/art/thread.cpp.o
+[ 38%] Building CXX object CMakeFiles/pine.dir/art/jit.cpp.o
+[ 44%] Building CXX object CMakeFiles/pine.dir/trampoline/trampoline_installer.cpp.o
+/home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/pine-core/src/main/cpp/art/jit.cpp:87:43: warning: unused parameter 'handle' [-Wunused-parameter]
+   87 | static void fake_jit_update_options(void* handle) {
+      |                                           ^
+1 warning generated.
+[ 50%] Building CXX object CMakeFiles/pine.dir/utils/memory.cpp.o
+In file included from /home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/pine-core/src/main/cpp/trampoline/trampoline_installer.cpp:5:
+/home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/pine-core/src/main/cpp/trampoline/trampoline_installer.h:29:50: warning: field 'kSkipBytes' will be initialized after field 'kReplacementModeOnly' [-Wreorder-ctor]
+   29 |         TrampolineInstaller(size_t skip_bytes) : kSkipBytes(skip_bytes), kReplacementModeOnly(false) {
+      |                                                  ^~~~~~~~~~~~~~~~~~~~~~  ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      |                                                  kReplacementModeOnly(false) kSkipBytes(skip_bytes)
+/home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/pine-core/src/main/cpp/trampoline/trampoline_installer.h:32:73: warning: field 'kSkipBytes' will be initialized after field 'kReplacementModeOnly' [-Wreorder-ctor]
+   32 |         TrampolineInstaller(size_t skip_bytes, bool replacement_only) : kSkipBytes(skip_bytes), kReplacementModeOnly(replacement_only) {
+      |                                                                         ^~~~~~~~~~~~~~~~~~~~~~  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      |                                                                         kReplacementModeOnly(replacement_only) kSkipBytes(skip_bytes)
+2 warnings generated.
+[ 55%] Building CXX object CMakeFiles/pine.dir/utils/scoped_memory_access_protection.cpp.o
+[ 61%] Building CXX object CMakeFiles/pine.dir/utils/elf_image.cpp.o
+[ 66%] Building CXX object CMakeFiles/pine.dir/utils/well_known_classes.cpp.o
+[ 72%] Building C object CMakeFiles/pine.dir/external/xz-embedded/linux/lib/xz/xz_crc32.c.o
+[ 77%] Building C object CMakeFiles/pine.dir/external/xz-embedded/linux/lib/xz/xz_dec_lzma2.c.o
+[ 83%] Building C object CMakeFiles/pine.dir/external/xz-embedded/linux/lib/xz/xz_dec_stream.c.o
+[ 88%] Building CXX object CMakeFiles/pine.dir/trampoline/arch/thumb2.cpp.o
+[ 94%] Building ASM object CMakeFiles/pine.dir/trampoline/arch/thumb2.S.o
+clang: warning: argument unused during compilation: '-arch armv7' [-Wunused-command-line-argument]
+In file included from /home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/pine-core/src/main/cpp/trampoline/arch/thumb2.cpp:5:
+In file included from /home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/pine-core/src/main/cpp/trampoline/arch/thumb2.h:9:
+/home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/pine-core/src/main/cpp/trampoline/arch/../trampoline_installer.h:29:50: warning: field 'kSkipBytes' will be initialized after field 'kReplacementModeOnly' [-Wreorder-ctor]
+   29 |         TrampolineInstaller(size_t skip_bytes) : kSkipBytes(skip_bytes), kReplacementModeOnly(false) {
+      |                                                  ^~~~~~~~~~~~~~~~~~~~~~  ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      |                                                  kReplacementModeOnly(false) kSkipBytes(skip_bytes)
+/home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/pine-core/src/main/cpp/trampoline/arch/../trampoline_installer.h:32:73: warning: field 'kSkipBytes' will be initialized after field 'kReplacementModeOnly' [-Wreorder-ctor]
+   32 |         TrampolineInstaller(size_t skip_bytes, bool replacement_only) : kSkipBytes(skip_bytes), kReplacementModeOnly(replacement_only) {
+      |                                                                         ^~~~~~~~~~~~~~~~~~~~~~  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      |                                                                         kReplacementModeOnly(replacement_only) kSkipBytes(skip_bytes)
+2 warnings generated.
+[100%] Linking CXX shared library libpine.so
+[100%] Built target pine

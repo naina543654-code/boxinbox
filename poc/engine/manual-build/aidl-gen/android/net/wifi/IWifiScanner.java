@@ -1,0 +1,166 @@
+/*
+ * This file is auto-generated.  DO NOT MODIFY.
+ * Using: /home/hatch/android-sdk/build-tools/35.0.0/aidl --lang=java -I/home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/android-mirror/src/main/aidl -I/home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/Bcore/src/main/aidl -I/home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engine/manual-build/aidl-overlay -I/home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engine/manual-build/aidl-prelude -o /home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engine/manual-build/aidl-gen /home/hatch/workspace/goals/privacy-sandbox-android-build/poc/engines/zitanioi-blackbox/android-mirror/src/main/aidl/android/net/wifi/IWifiScanner.aidl
+ */
+package android.net.wifi;
+public interface IWifiScanner extends android.os.IInterface
+{
+  /** Default implementation for IWifiScanner. */
+  public static class Default implements android.net.wifi.IWifiScanner
+  {
+    @Override public android.os.Messenger getMessenger() throws android.os.RemoteException
+    {
+      return null;
+    }
+    @Override public android.os.Bundle getAvailableChannels(int band) throws android.os.RemoteException
+    {
+      return null;
+    }
+    @Override
+    public android.os.IBinder asBinder() {
+      return null;
+    }
+  }
+  /** Local-side IPC implementation stub class. */
+  public static abstract class Stub extends android.os.Binder implements android.net.wifi.IWifiScanner
+  {
+    /** Construct the stub at attach it to the interface. */
+    @SuppressWarnings("this-escape")
+    public Stub()
+    {
+      this.attachInterface(this, DESCRIPTOR);
+    }
+    /**
+     * Cast an IBinder object into an android.net.wifi.IWifiScanner interface,
+     * generating a proxy if needed.
+     */
+    public static android.net.wifi.IWifiScanner asInterface(android.os.IBinder obj)
+    {
+      if ((obj==null)) {
+        return null;
+      }
+      android.os.IInterface iin = obj.queryLocalInterface(DESCRIPTOR);
+      if (((iin!=null)&&(iin instanceof android.net.wifi.IWifiScanner))) {
+        return ((android.net.wifi.IWifiScanner)iin);
+      }
+      return new android.net.wifi.IWifiScanner.Stub.Proxy(obj);
+    }
+    @Override public android.os.IBinder asBinder()
+    {
+      return this;
+    }
+    @Override public boolean onTransact(int code, android.os.Parcel data, android.os.Parcel reply, int flags) throws android.os.RemoteException
+    {
+      java.lang.String descriptor = DESCRIPTOR;
+      if (code >= android.os.IBinder.FIRST_CALL_TRANSACTION && code <= android.os.IBinder.LAST_CALL_TRANSACTION) {
+        data.enforceInterface(descriptor);
+      }
+      if (code == INTERFACE_TRANSACTION) {
+        reply.writeString(descriptor);
+        return true;
+      }
+      switch (code)
+      {
+        case TRANSACTION_getMessenger:
+        {
+          android.os.Messenger _result = this.getMessenger();
+          reply.writeNoException();
+          _Parcel.writeTypedObject(reply, _result, android.os.Parcelable.PARCELABLE_WRITE_RETURN_VALUE);
+          break;
+        }
+        case TRANSACTION_getAvailableChannels:
+        {
+          int _arg0;
+          _arg0 = data.readInt();
+          android.os.Bundle _result = this.getAvailableChannels(_arg0);
+          reply.writeNoException();
+          _Parcel.writeTypedObject(reply, _result, android.os.Parcelable.PARCELABLE_WRITE_RETURN_VALUE);
+          break;
+        }
+        default:
+        {
+          return super.onTransact(code, data, reply, flags);
+        }
+      }
+      return true;
+    }
+    private static class Proxy implements android.net.wifi.IWifiScanner
+    {
+      private android.os.IBinder mRemote;
+      Proxy(android.os.IBinder remote)
+      {
+        mRemote = remote;
+      }
+      @Override public android.os.IBinder asBinder()
+      {
+        return mRemote;
+      }
+      public java.lang.String getInterfaceDescriptor()
+      {
+        return DESCRIPTOR;
+      }
+      @Override public android.os.Messenger getMessenger() throws android.os.RemoteException
+      {
+        android.os.Parcel _data = android.os.Parcel.obtain();
+        android.os.Parcel _reply = android.os.Parcel.obtain();
+        android.os.Messenger _result;
+        try {
+          _data.writeInterfaceToken(DESCRIPTOR);
+          boolean _status = mRemote.transact(Stub.TRANSACTION_getMessenger, _data, _reply, 0);
+          _reply.readException();
+          _result = _Parcel.readTypedObject(_reply, android.os.Messenger.CREATOR);
+        }
+        finally {
+          _reply.recycle();
+          _data.recycle();
+        }
+        return _result;
+      }
+      @Override public android.os.Bundle getAvailableChannels(int band) throws android.os.RemoteException
+      {
+        android.os.Parcel _data = android.os.Parcel.obtain();
+        android.os.Parcel _reply = android.os.Parcel.obtain();
+        android.os.Bundle _result;
+        try {
+          _data.writeInterfaceToken(DESCRIPTOR);
+          _data.writeInt(band);
+          boolean _status = mRemote.transact(Stub.TRANSACTION_getAvailableChannels, _data, _reply, 0);
+          _reply.readException();
+          _result = _Parcel.readTypedObject(_reply, android.os.Bundle.CREATOR);
+        }
+        finally {
+          _reply.recycle();
+          _data.recycle();
+        }
+        return _result;
+      }
+    }
+    /** @hide */
+    public static final java.lang.String DESCRIPTOR = "android.net.wifi.IWifiScanner";
+    static final int TRANSACTION_getMessenger = (android.os.IBinder.FIRST_CALL_TRANSACTION + 0);
+    static final int TRANSACTION_getAvailableChannels = (android.os.IBinder.FIRST_CALL_TRANSACTION + 1);
+  }
+  public android.os.Messenger getMessenger() throws android.os.RemoteException;
+  public android.os.Bundle getAvailableChannels(int band) throws android.os.RemoteException;
+  /** @hide */
+  static class _Parcel {
+    static private <T> T readTypedObject(
+        android.os.Parcel parcel,
+        android.os.Parcelable.Creator<T> c) {
+      if (parcel.readInt() != 0) {
+          return c.createFromParcel(parcel);
+      } else {
+          return null;
+      }
+    }
+    static private <T extends android.os.Parcelable> void writeTypedObject(
+        android.os.Parcel parcel, T value, int parcelableFlags) {
+      if (value != null) {
+        parcel.writeInt(1);
+        value.writeToParcel(parcel, parcelableFlags);
+      } else {
+        parcel.writeInt(0);
+      }
+    }
+  }
+}
