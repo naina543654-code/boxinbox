@@ -201,6 +201,16 @@ s_aar() {  # assemble the AAR zip
       pine=$(find "$WORK/native-pine-$abi" -name "libpine.so" | head -1)
       [ -n "$pine" ] && cp "$pine" "$WORK/aar/jni/$abi/"
     fi
+    # libblackbox.so links against the SHARED libc++ (c++_shared STL). A normal
+    # AGP/CMake build auto-packages it; the manual build must do it explicitly,
+    # otherwise guest launch dies with UnsatisfiedLinkError: libc++_shared.so not found.
+    case "$abi" in
+      arm64-v8a)   triple=aarch64-linux-android ;;
+      armeabi-v7a) triple=arm-linux-androideabi ;;
+      x86)         triple=i686-linux-android ;;
+    esac
+    cp "$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/$triple/libc++_shared.so" \
+       "$WORK/aar/jni/$abi/"
   done
   ( cd "$WORK/aar" && "$JH/bin/jar" cf "$AAR" . )
   echo "AAR_OK: $AAR"
