@@ -235,14 +235,18 @@ class BlackBoxRuntime : SandboxRuntime {
      * This wipe therefore trusts nothing: it first heals the engine's
      * user record (a previous failed wipe can remove user 0 from the
      * engine's user table, which turns every later uninstallPackageAsUser
-     * into a silent no-op); then the engine's deleteUser runs
-     * first (one full pass); anything its loop missed gets an isolated
-     * per-package uninstall; GMS goes through the engine's own
-     * uninstaller; every on-disk location is force-cleared with an
-     * iterative deleter (no recursion — deep GMS trees); and the result
-     * is VERIFIED. Anything surviving is reported by name instead of
-     * silently kept. Each phase logs to logcat (tag BoxInBoxWipe) so a
-     * slow or stuck wipe shows exactly where it is.
+     * into a silent no-op); then every package gets an isolated
+     * per-package uninstall while user 0 still exists; GMS goes through
+     * the engine's own uninstaller; the engine's deleteUser runs LAST and
+     * only for bookkeeping — its internal loop removes packages from the
+     * ArrayMap it is iterating, silently skipping half of them, so it
+     * must never be the primary uninstall path; every on-disk location
+     * is force-cleared with an iterative deleter (no recursion — deep
+     * GMS trees); the user record is re-created before verification
+     * (the engine's list queries false-pass when the user is absent);
+     * and the result is VERIFIED. Anything surviving is reported by name
+     * instead of silently kept. Each phase logs to logcat (tag
+     * BoxInBoxWipe) so a slow or stuck wipe shows exactly where it is.
      */
     private fun wipeVirtualUser() {
         // Anomalies seen along the way (diagnostic context only).
@@ -281,50 +285,55 @@ class BlackBoxRuntime : SandboxRuntime {
             runCatching { core().stopPackage(pkg, VIRTUAL_USER_ID) }
         }
 
-        // 2. Drop the virtual user via the engine. Best-effort: its
-        //    internal loop aborts on the first bad package, so steps 3-5
-        //    clean up whatever it missed. Runs first so the common case
-        //    costs one pass instead of three.
-        Log.i(TAG_WIPE, "phase=engine-delete-user: calling deleteUser($VIRTUAL_USER_ID)")
-        runCatching { users().deleteUser(VIRTUAL_USER_ID) }
-            .onSuccess { Log.i(TAG_WIPE, "phase=engine-delete-user: returned cleanly") }
-            .onFailure {
-                Log.w(TAG_WIPE, "phase=engine-delete-user: threw: ${it.message}")
-                issues += "engine deleteUser threw: ${it.message}"
+        // 2. Isolated per-package uninstall for EVERY collected package,
+        //    while user 0 still exists (the engine's isInstalled() and list
+        //    queries go blind once the user record is gone). Each uninstall
+        //    is its own engine call — never iterating the engine's package
+        //    map while it mutates, which is exactly what breaks the
+        //    engine's own deleteUser (it removes packages from the ArrayMap
+        //    it is iterating, silently skipping half of them).
+        Log.i(TAG_WIPE, "phase=uninstall-all count=${pkgs.size}")
+        for (pkg in pkgs) {
+            runCatching {
+                Log.i(TAG_WIPE, "uninstalling $pkg")
+                core().uninstallPackageAsUser(pkg, VIRTUAL_USER_ID)
+                Log.i(TAG_WIPE, "uninstalled $pkg")
+            }.onFailure {
+                Log.w(TAG_WIPE, "uninstall $pkg threw: " +
+                    "${it::class.java.simpleName}: ${it.message}")
+                issues += "uninstall $pkg threw: ${it.message}"
             }
-
-        // 3. Isolated per-package uninstall for whatever the engine's loop
-        //    left behind — one bad package must not abort the rest.
-        //    (Usually empty: after a successful engine deleteUser the user
-        //    is gone and the list below is empty.)
-        val remainder = runCatching { installedGuestPackages() }
-            .getOrDefault(emptyList())
-        Log.i(TAG_WIPE, "phase=uninstall-remainder count=${remainder.size}")
-        for (pkg in remainder) {
-            runCatching { core().uninstallPackageAsUser(pkg, VIRTUAL_USER_ID) }
-                .onFailure { issues += "uninstall $pkg threw: ${it.message}" }
         }
 
-        // 4. GMS via the engine's own uninstaller (invisible to the list above).
-        Log.i(TAG_WIPE, "phase=uninstall-gms")
+        // 3. GMS via the engine's own uninstaller (its packages are hidden
+        //    from the list above, and may carry flags the generic path
+        //    skips).
+        Log.i(TAG_WIPE, "phase=uninstall-gms: calling uninstallGms($VIRTUAL_USER_ID)")
         runCatching {
             if (!core().uninstallGms(VIRTUAL_USER_ID)) {
                 issues += "GMS uninstall reported incomplete"
             }
-        }.onFailure { issues += "GMS uninstall threw: ${it.message}" }
-
-        // 5. Retry the engine deleteUser now that packages are gone: its
-        //    loop is empty, so this only finishes the bookkeeping (user
-        //    record, data/user/0, external dir) when step 2 bailed early.
-        Log.i(TAG_WIPE, "phase=engine-delete-user-retry: calling deleteUser($VIRTUAL_USER_ID)")
-        runCatching { users().deleteUser(VIRTUAL_USER_ID) }
-            .onSuccess { Log.i(TAG_WIPE, "phase=engine-delete-user-retry: returned cleanly") }
+        }.onSuccess { Log.i(TAG_WIPE, "phase=uninstall-gms: returned") }
             .onFailure {
-                Log.w(TAG_WIPE, "phase=engine-delete-user-retry: threw: ${it.message}")
-                issues += "engine deleteUser retry threw: ${it.message}"
+                Log.w(TAG_WIPE, "phase=uninstall-gms threw: ${it.message}")
+                issues += "GMS uninstall threw: ${it.message}"
             }
 
-        // 6. Scorched earth: force-remove every on-disk location that can
+        // 4. Engine deleteUser ONCE, purely for bookkeeping (user record,
+        //    data/user/0, external dir). Its internal package loop now runs
+        //    over an empty map, so the iterate-while-removing bug cannot
+        //    trigger. Best-effort: the sweep and verify below are the real
+        //    guarantees.
+        Log.i(TAG_WIPE, "phase=engine-delete-user: calling deleteUser($VIRTUAL_USER_ID)")
+        runCatching { users().deleteUser(VIRTUAL_USER_ID) }
+            .onSuccess { Log.i(TAG_WIPE, "phase=engine-delete-user: returned cleanly") }
+            .onFailure {
+                Log.w(TAG_WIPE, "phase=engine-delete-user: threw: " +
+                    "${it::class.java.simpleName}: ${it.message}")
+                issues += "engine deleteUser threw: ${it.message}"
+            }
+
+        // 5. Scorched earth: force-remove every on-disk location that can
         //    hold user-0 state — including ones the engine only reaches via
         //    its per-package loop (data/user_de/0, data/app/<pkg>,
         //    hotfix/u0). Survivors are fatal.
@@ -358,6 +367,20 @@ class BlackBoxRuntime : SandboxRuntime {
             }
             Log.i(TAG_WIPE, "phase=sweep-retry done, survivors=${dirSurvivors.size}")
         }
+
+        // 6. Re-create the user record before verifying. The engine's
+        //    list queries (getInstalledPackages, isInstalled, isInstallGms)
+        //    all return empty/false when the user record is absent — so
+        //    verifying AFTER the engine deleteUser would false-pass even
+        //    with packages still registered. Re-creating makes the check
+        //    below meaningful. Harmless for delete (the next identity
+        //    creates the user again); required for reset.
+        Log.i(TAG_WIPE, "phase=verify-user: re-creating user $VIRTUAL_USER_ID for verification")
+        runCatching { users().createUser(VIRTUAL_USER_ID) }
+            .onFailure {
+                Log.w(TAG_WIPE, "phase=verify-user: createUser threw: ${it.message}")
+                issues += "verify createUser threw: ${it.message}"
+            }
 
         // 7. In-memory verification: nothing still registered for user 0.
         //    Survivors are fatal; the lists above are only context.
