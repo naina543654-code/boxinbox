@@ -108,3 +108,4 @@ see `poc/SPOOFING_MATRIX.md` for the verification matrix.
 - host-runtime Gradle now depends on `../../engine/Bcore-release.aar` directly — the app/libs copy step (and its staleness trap) is gone.
 - `generateVersionRes` (probe + host) now declares buildSha/buildDate as task inputs. Without inputs, Gradle's up-to-date check skipped the task after the first build: versionName (configuration-time) refreshed while the footer froze at the old SHA.
 - Source-only changes (Gradle build files); shipped APKs in poc/apks/ are unaffected.
+- Correction to the note above: the stale app/libs AAR was tracked (last touched at d24b388), not untracked — pulls delivered it; it was simply never regenerated alongside engine/. md5 c2039905f31b1760701ea0b31b752be9 (Jason's machine matched this exactly) vs engine 05d106998c1f140b44ceac778d37223e. The app/libs copy is now removed from the repo so nothing can consume it again.
