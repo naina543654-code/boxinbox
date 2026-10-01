@@ -23,7 +23,13 @@ object Ui {
      */
     fun bg(activity: Activity, work: () -> String, onDone: (String) -> Unit = {}) {
         Thread {
-            val result = try { work() } catch (e: Exception) { "FAIL: ${e.message ?: e}" }
+            // Throwable, not just Exception: an Error (e.g. stack overflow
+            // in a deep delete) must surface as a FAIL toast, never as
+            // silence — a dead thread with no toast looks like "nothing
+            // happens" when tapping Delete/Reset.
+            val result = try { work() } catch (t: Throwable) {
+                "FAIL: ${t.javaClass.simpleName}: ${t.message ?: t}"
+            }
             activity.runOnUiThread {
                 Toast.makeText(activity, result, Toast.LENGTH_LONG).show()
                 onDone(result)

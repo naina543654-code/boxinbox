@@ -1,10 +1,12 @@
 package com.sandboxpoc.hostruntime.runtime
 
 import android.os.Looper
+import android.util.Log
 import top.niunaijun.blackbox.BlackBoxCore
 import top.niunaijun.blackbox.core.env.BEnvironment
 import top.niunaijun.blackbox.core.system.user.BUserManagerService
 import java.io.File
+import java.nio.file.Files
 
 /**
  * [SandboxRuntime] backed by the BlackBox application-virtualization engine
@@ -44,6 +46,8 @@ class BlackBoxRuntime : SandboxRuntime {
     companion object {
         /** Virtual user backing the single active identity (V1). */
         const val VIRTUAL_USER_ID = 0
+        /** Logcat tag for wipe phase markers (delete/reset diagnostics). */
+        private const val TAG_WIPE = "BoxInBoxWipe"
     }
 
     @Volatile private var state: RuntimeStatus = RuntimeStatus.NOT_CREATED
@@ -213,15 +217,20 @@ class BlackBoxRuntime : SandboxRuntime {
      * getInstalledPackages hides GMS clones, so "uninstall everything
      * listed" misses them.
      *
-     * This wipe therefore trusts nothing: per-package uninstalls are
-     * isolated, GMS goes through the engine's own uninstaller, every
-     * on-disk location is force-cleared, and the result is VERIFIED.
-     * Anything surviving is reported by name instead of silently kept.
+     * This wipe therefore trusts nothing: the engine's deleteUser runs
+     * first (one full pass); anything its loop missed gets an isolated
+     * per-package uninstall; GMS goes through the engine's own
+     * uninstaller; every on-disk location is force-cleared with an
+     * iterative deleter (no recursion — deep GMS trees); and the result
+     * is VERIFIED. Anything surviving is reported by name instead of
+     * silently kept. Each phase logs to logcat (tag BoxInBoxWipe) so a
+     * slow or stuck wipe shows exactly where it is.
      */
     private fun wipeVirtualUser() {
         // Anomalies seen along the way (diagnostic context only).
         val issues = mutableListOf<String>()
 
+        Log.i(TAG_WIPE, "phase=collect")
         // Packages from the engine list (GMS-filtered) plus every on-disk
         // app dir (covers GMS clones and partial installs the list hides).
         val pkgs = mutableSetOf<String>()
@@ -233,30 +242,47 @@ class BlackBoxRuntime : SandboxRuntime {
         }
 
         // 1. Stop running guests so open files don't block deletion.
+        Log.i(TAG_WIPE, "phase=stop pkgs=${pkgs.size}")
         for (pkg in pkgs) {
             runCatching { core().stopPackage(pkg, VIRTUAL_USER_ID) }
         }
 
-        // 2. GMS via the engine's own uninstaller (invisible to the list above).
+        // 2. Drop the virtual user via the engine. Best-effort: its
+        //    internal loop aborts on the first bad package, so steps 3-5
+        //    clean up whatever it missed. Runs first so the common case
+        //    costs one pass instead of three.
+        Log.i(TAG_WIPE, "phase=engine-delete-user")
+        runCatching { users().deleteUser(VIRTUAL_USER_ID) }
+            .onFailure { issues += "engine deleteUser threw: ${it.message}" }
+
+        // 3. Isolated per-package uninstall for whatever the engine's loop
+        //    left behind — one bad package must not abort the rest.
+        //    (Usually empty: after a successful engine deleteUser the user
+        //    is gone and the list below is empty.)
+        val remainder = runCatching { installedGuestPackages() }
+            .getOrDefault(emptyList())
+        Log.i(TAG_WIPE, "phase=uninstall-remainder count=${remainder.size}")
+        for (pkg in remainder) {
+            runCatching { core().uninstallPackageAsUser(pkg, VIRTUAL_USER_ID) }
+                .onFailure { issues += "uninstall $pkg threw: ${it.message}" }
+        }
+
+        // 4. GMS via the engine's own uninstaller (invisible to the list above).
+        Log.i(TAG_WIPE, "phase=uninstall-gms")
         runCatching {
             if (!core().uninstallGms(VIRTUAL_USER_ID)) {
                 issues += "GMS uninstall reported incomplete"
             }
         }.onFailure { issues += "GMS uninstall threw: ${it.message}" }
 
-        // 3. Uninstall every remaining package in isolation — one bad
-        //    package must not abort the wipe of the others.
-        for (pkg in pkgs) {
-            runCatching { core().uninstallPackageAsUser(pkg, VIRTUAL_USER_ID) }
-                .onFailure { issues += "uninstall $pkg threw: ${it.message}" }
-        }
-
-        // 4. Drop the virtual user via the engine. Best-effort: step 5 does
-        //    not depend on this succeeding.
+        // 5. Retry the engine deleteUser now that packages are gone: its
+        //    loop is empty, so this only finishes the bookkeeping (user
+        //    record, data/user/0, external dir) when step 2 bailed early.
+        Log.i(TAG_WIPE, "phase=engine-delete-user-retry")
         runCatching { users().deleteUser(VIRTUAL_USER_ID) }
-            .onFailure { issues += "engine deleteUser threw: ${it.message}" }
+            .onFailure { issues += "engine deleteUser retry threw: ${it.message}" }
 
-        // 5. Scorched earth: force-remove every on-disk location that can
+        // 6. Scorched earth: force-remove every on-disk location that can
         //    hold user-0 state — including ones the engine only reaches via
         //    its per-package loop (data/user_de/0, data/app/<pkg>,
         //    hotfix/u0). Survivors are fatal.
@@ -267,20 +293,24 @@ class BlackBoxRuntime : SandboxRuntime {
             BEnvironment.getHotfixDir(VIRTUAL_USER_ID),
         )
         pkgs.forEach { dirs += BEnvironment.getAppDir(it) }
+        val targets = dirs.distinct().filter { it.exists() }
+        Log.i(TAG_WIPE, "phase=sweep-dirs count=${targets.size}")
         val dirSurvivors = mutableListOf<String>()
-        for (d in dirs.distinct()) {
-            if (!d.exists()) continue
-            d.deleteRecursively()
-            if (d.exists()) dirSurvivors += d.absolutePath
+        for (d in targets) {
+            if (!deleteTree(d)) dirSurvivors += d.absolutePath
         }
 
-        // 6. In-memory verification: nothing still registered for user 0.
+        // 7. In-memory verification: nothing still registered for user 0.
         //    Survivors are fatal; the lists above are only context.
+        Log.i(TAG_WIPE, "phase=verify")
         val stillRegistered = runCatching { installedGuestPackages() }
             .getOrDefault(emptyList())
         val gmsLeft = runCatching { core().isInstallGms(VIRTUAL_USER_ID) }
             .getOrDefault(false)
 
+        Log.i(TAG_WIPE, "verify: dirSurvivors=${dirSurvivors.size} " +
+            "stillRegistered=${stillRegistered.size} gmsLeft=$gmsLeft " +
+            "issues=${issues.size}")
         check(dirSurvivors.isEmpty() && stillRegistered.isEmpty() && !gmsLeft) {
             buildString {
                 append("identity wipe incomplete")
@@ -295,6 +325,36 @@ class BlackBoxRuntime : SandboxRuntime {
                     append(" [warnings: ${issues.joinToString("; ")}]")
                 }
             }.toString()
+        }
+        Log.i(TAG_WIPE, "wipe complete")
+    }
+
+    /**
+     * Iterative post-order directory delete. [File.deleteRecursively] is
+     * recursive and can die with a StackOverflowError on deep trees (GMS
+     * data); this never recurses, never follows symlinks, and reports
+     * failure instead of throwing.
+     */
+    private fun deleteTree(root: File): Boolean {
+        return try {
+            val stack = ArrayDeque<File>()
+            val order = ArrayDeque<File>()
+            stack.add(root)
+            while (stack.isNotEmpty()) {
+                val f = stack.removeLast()
+                order.add(f)
+                if (f.isDirectory && !Files.isSymbolicLink(f.toPath())) {
+                    f.listFiles()?.forEach { stack.add(it) }
+                }
+            }
+            var ok = true
+            while (order.isNotEmpty()) {
+                val f = order.removeLast()
+                if (f.exists() && !f.delete()) ok = false
+            }
+            ok && !root.exists()
+        } catch (t: Throwable) {
+            false
         }
     }
 
