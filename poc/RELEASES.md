@@ -96,3 +96,9 @@ see `poc/SPOOFING_MATRIX.md` for the verification matrix.
 ## `poc-v1` — `48310e4` (2026-09-30)
 
 - Baseline on branch `v1`: engine + host runtime before the v2 spoof hooks.
+
+## 87c33e6 (2026-10-01) — MAC generator hotfix
+- Fixed identity generation failing on-device with `Generated profile invalid: [network.wifiMac ...]`.
+- Root cause: `newLocalMac()` only set the locally-administered bit, producing first bytes like 06/0A/12.. ~15/16 of the time, but `ProfileValidator.LOCAL_MAC_RE` requires exactly `02:`.
+- Generator now forces first byte `0x02`; verified 2000/2000 generated MACs pass the validator.
+- Rebuilt host APK stamped `87c33e6 (2026-10-01)`. Probe unchanged.
