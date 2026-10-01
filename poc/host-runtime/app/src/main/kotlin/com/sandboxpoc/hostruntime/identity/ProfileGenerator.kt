@@ -15,13 +15,16 @@ import java.util.UUID
  * - profileId: the identity's UUID (one active identity per V1 scope)
  * - generatedAt: epoch millis at generation time
  * - androidId: fresh 16 lowercase hex chars every time
- * - location: fixed virtual base point + small random jitter per profile,
- *   movement disabled
+ * - location: random city base point per identity + small random jitter,
+ *   movement disabled; city, country and operator are picked together so
+ *   the spoofed location always matches the spoofed carrier's country
  * - sensors: list consistent with the device class (real Android sensor
  *   type ints; vendor/name strings plausible per manufacturer)
- * - network: fixed virtual Wi-Fi identity ("SandboxNet")
- * - telephony: fresh deviceId (16 hex) + subscriberId (15 digits) per
- *   identity; operator fields fixed to the contract values
+ * - network: random plausible Wi-Fi SSID + random locally-administered
+ *   BSSID per identity
+ * - telephony: fresh deviceId (16 hex) + subscriberId (15 digits, MCC
+ *   prefix matching the operator) per identity; operator picked at random
+ *   from real carriers in the locale's country
  *
  * Profiles are never built by randomizing device fields independently.
  * Row preference: rows whose apiLevel matches the host device's
@@ -35,9 +38,71 @@ object ProfileGenerator {
     private val HEX = "0123456789abcdef".toCharArray()
     private val DIGITS = "0123456789".toCharArray()
 
-    // Virtual base location (San Francisco); per-profile jitter is applied.
-    private const val BASE_LATITUDE = 37.7749
-    private const val BASE_LONGITUDE = -122.4194
+    // Virtual locale pool: each entry keeps city, country and carriers
+    // together so a profile never claims e.g. a US carrier while standing
+    // in Mumbai. One locale is picked per identity.
+    private data class OperatorSpec(val name: String, val numeric: String)
+    private data class LocaleSpec(
+        val city: String,
+        val latitude: Double,
+        val longitude: Double,
+        val countryIso: String,
+        val operators: List<OperatorSpec>,
+    )
+
+    private val LOCALES = listOf(
+        LocaleSpec("San Francisco", 37.7749, -122.4194, "us", listOf(
+            OperatorSpec("T-Mobile", "310260"),
+            OperatorSpec("Verizon", "311480"),
+            OperatorSpec("AT&T", "310410"),
+        )),
+        LocaleSpec("New York", 40.7128, -74.0060, "us", listOf(
+            OperatorSpec("T-Mobile", "310260"),
+            OperatorSpec("Verizon", "311480"),
+            OperatorSpec("AT&T", "310410"),
+        )),
+        LocaleSpec("London", 51.5074, -0.1278, "gb", listOf(
+            OperatorSpec("EE", "23430"),
+            OperatorSpec("O2", "23410"),
+            OperatorSpec("Vodafone", "23415"),
+        )),
+        LocaleSpec("Berlin", 52.5200, 13.4050, "de", listOf(
+            OperatorSpec("Telekom", "26201"),
+            OperatorSpec("Vodafone", "26202"),
+            OperatorSpec("O2", "26203"),
+        )),
+        LocaleSpec("Mumbai", 19.0760, 72.8777, "in", listOf(
+            OperatorSpec("Airtel", "40410"),
+            OperatorSpec("Vi", "40484"),
+        )),
+        LocaleSpec("Singapore", 1.3521, 103.8198, "sg", listOf(
+            OperatorSpec("Singtel", "52501"),
+            OperatorSpec("StarHub", "52505"),
+        )),
+        LocaleSpec("Tokyo", 35.6762, 139.6503, "jp", listOf(
+            OperatorSpec("NTT DoCoMo", "44010"),
+            OperatorSpec("SoftBank", "44020"),
+        )),
+        LocaleSpec("Sydney", -33.8688, 151.2093, "au", listOf(
+            OperatorSpec("Telstra", "50501"),
+            OperatorSpec("Optus", "50502"),
+        )),
+        LocaleSpec("Toronto", 43.6532, -79.3832, "ca", listOf(
+            OperatorSpec("Rogers", "302720"),
+            OperatorSpec("Bell", "302610"),
+        )),
+        LocaleSpec("Paris", 48.8566, 2.3522, "fr", listOf(
+            OperatorSpec("Orange", "20801"),
+            OperatorSpec("SFR", "20810"),
+        )),
+    )
+
+    // Plausible generic SSID stems; a random suffix is appended per identity.
+    private val SSID_STEMS = listOf(
+        "HomeNet", "Home_WiFi", "FiberNet", "CoffeeShop", "Linksys",
+        "NETGEAR", "TP-Link", "xfinitywifi", "MySpectrumWiFi", "GuestNet",
+        "OfficeWiFi", "Hotel_Guest", "Airport_Free", "CafeConnect",
+    )
     /** Jitter range in degrees (~±550 m) applied per profile. */
     private const val JITTER_DEGREES = 0.01
 
@@ -64,6 +129,8 @@ object ProfileGenerator {
         avoidFingerprint: String? = null,
     ): SpoofProfile {
         val row = pickRow(avoidFingerprint)
+        val locale = LOCALES[random.nextInt(LOCALES.size)]
+        val operator = locale.operators[random.nextInt(locale.operators.size)]
         val device = SpoofProfile.DeviceInfo(
             manufacturer = row.manufacturer,
             brand = row.brand,
@@ -85,19 +152,19 @@ object ProfileGenerator {
             generatedAt = System.currentTimeMillis(),
             device = device,
             androidId = newAndroidId(),
-            location = newLocation(),
+            location = newLocation(locale),
             sensors = sensorsFor(row),
             network = SpoofProfile.NetworkInfo(
-                ssid = "\"SandboxNet\"",
-                bssid = "02:15:3E:4A:5B:6C",
+                ssid = newSsid(),
+                bssid = newBssid(),
                 transport = "WIFI",
             ),
             telephony = SpoofProfile.TelephonyInfo(
-                operatorName = "T-Mobile",
-                operatorNumeric = "310260",
-                countryIso = "us",
+                operatorName = operator.name,
+                operatorNumeric = operator.numeric,
+                countryIso = locale.countryIso,
                 deviceId = newAndroidId(),
-                subscriberId = newSubscriberId(),
+                subscriberId = newSubscriberId(operator.numeric.take(3)),
             ),
         )
     }
@@ -106,9 +173,11 @@ object ProfileGenerator {
     fun newAndroidId(): String =
         CharArray(16) { HEX[random.nextInt(16)] }.concatToString()
 
-    /** Fresh 15-digit IMSI-shaped subscriber ID. */
-    fun newSubscriberId(): String =
-        CharArray(15) { DIGITS[random.nextInt(10)] }.concatToString()
+    /** Fresh 15-digit IMSI-shaped subscriber ID, MCC prefix of the operator. */
+    fun newSubscriberId(mcc: String = ""): String {
+        val tail = CharArray(15 - mcc.length) { DIGITS[random.nextInt(10)] }.concatToString()
+        return mcc + tail
+    }
 
     /**
      * Prefers device rows whose apiLevel equals the host's SDK_INT (so the
@@ -144,11 +213,11 @@ object ProfileGenerator {
         return pool[random.nextInt(pool.size)]
     }
 
-    /** Virtual location: base point + per-profile jitter; movement disabled. */
-    private fun newLocation(): SpoofProfile.LocationInfo =
+    /** Virtual location: locale city base point + per-profile jitter; movement disabled. */
+    private fun newLocation(locale: LocaleSpec): SpoofProfile.LocationInfo =
         SpoofProfile.LocationInfo(
-            latitude = BASE_LATITUDE + (random.nextDouble() - 0.5) * JITTER_DEGREES,
-            longitude = BASE_LONGITUDE + (random.nextDouble() - 0.5) * JITTER_DEGREES,
+            latitude = locale.latitude + (random.nextDouble() - 0.5) * JITTER_DEGREES,
+            longitude = locale.longitude + (random.nextDouble() - 0.5) * JITTER_DEGREES,
             accuracy = 15.0,
             altitude = 25.0,
             speed = 0.0,
@@ -159,6 +228,20 @@ object ProfileGenerator {
                 bearingDeg = 90.0,
             ),
         )
+
+    /** Random plausible SSID per identity (quoted, as Android reports it). */
+    private fun newSsid(): String {
+        val stem = SSID_STEMS[random.nextInt(SSID_STEMS.size)]
+        val suffix = if (random.nextBoolean()) "_5G"
+        else "-" + CharArray(4) { "0123456789ABCDEF"[random.nextInt(16)] }.concatToString()
+        return "\"$stem$suffix\""
+    }
+
+    /** Random locally-administered BSSID per identity (02:xx:xx:xx:xx:xx). */
+    private fun newBssid(): String {
+        val bytes = ByteArray(5).also { random.nextBytes(it) }
+        return "02:" + bytes.joinToString(":") { "%02X".format(it.toInt() and 0xFF) }
+    }
 
     /** Plausible vendor/name strings for the sensor set, per manufacturer. */
     private data class SensorVendorStrings(
