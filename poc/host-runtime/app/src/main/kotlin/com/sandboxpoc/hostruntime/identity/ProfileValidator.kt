@@ -166,6 +166,9 @@ object ProfileValidator {
             violations += "telephony.operatorNumeric '${sp.telephony.operatorNumeric}' is not all digits"
         }
         if (sp.telephony.countryIso.isBlank()) violations += "telephony.countryIso is blank"
+        if (sp.telephony.networkType !in setOf(13, 20, 10)) {
+            violations += "telephony.networkType '${sp.telephony.networkType}' is not one of LTE(13)/NR(20)/HSPA(10)"
+        }
 
         return violations
     }

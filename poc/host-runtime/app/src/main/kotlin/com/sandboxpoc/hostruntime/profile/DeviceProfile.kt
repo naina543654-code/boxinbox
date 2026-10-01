@@ -932,7 +932,8 @@ data class DeviceProfile(
  *   "network": { "ssid": "\"SandboxNet\"", "bssid": "02:15:3E:4A:5B:6C",
  *     "transport": "WIFI" },
  *   "telephony": { "operatorName": "T-Mobile", "operatorNumeric": "310260",
- *     "countryIso": "us", "deviceId": "<16 hex>", "subscriberId": "<15 digits>" }
+ *     "countryIso": "us", "deviceId": "<16 hex>", "subscriberId": "<15 digits>",
+ *     "networkType": 13 }
  * }
  * ```
  *
@@ -1001,6 +1002,7 @@ data class SpoofProfile(
         val countryIso: String,
         val deviceId: String,
         val subscriberId: String,
+        val networkType: Int,
     )
 
     // ------------------------------------------------------------------
@@ -1061,7 +1063,8 @@ data class SpoofProfile(
         jname("operatorNumeric"); append(':'); jstr(telephony.operatorNumeric); append(',')
         jname("countryIso"); append(':'); jstr(telephony.countryIso); append(',')
         jname("deviceId"); append(':'); jstr(telephony.deviceId); append(',')
-        jname("subscriberId"); append(':'); jstr(telephony.subscriberId)
+        jname("subscriberId"); append(':'); jstr(telephony.subscriberId); append(',')
+        jname("networkType"); append(':'); append(telephony.networkType.toString())
         append('}')
         append('}')
     }
@@ -1158,6 +1161,9 @@ data class SpoofProfile(
                     operatorNumeric = getStr(t, "operatorNumeric"),
                     countryIso = getStr(t, "countryIso"),
                     deviceId = getStr(t, "deviceId"),
+                    // Tolerant: profiles persisted before networkType existed
+                    // (e.g. pre-2026-10-01 identities) default to LTE.
+                    networkType = (t["networkType"] as? Number)?.toInt() ?: 13,
                     subscriberId = getStr(t, "subscriberId"),
                 ),
             )

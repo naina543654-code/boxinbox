@@ -968,9 +968,11 @@ public class MainActivity extends Activity {
         String eName = opt(tel, "operatorName");
         String eNum = opt(tel, "operatorNumeric");
         String eIso = opt(tel, "countryIso");
+        int eNt = tel == null ? -1 : tel.optInt("networkType", -1);
         String oName = null;
         String oNum = null;
         String oIso = null;
+        int oNt = -1;
         String err = null;
         try {
             if (checkSelfPermission(Manifest.permission.READ_PHONE_STATE)
@@ -984,6 +986,7 @@ public class MainActivity extends Activity {
                     oName = emptyToNull(tm.getNetworkOperatorName());
                     oNum = emptyToNull(tm.getNetworkOperator());
                     oIso = emptyToNull(tm.getNetworkCountryIso());
+                    oNt = tm.getDataNetworkType();
                     if (oName == null && oNum == null && oIso == null) {
                         err = "NO_NETWORK_INFO (empty results)";
                     }
@@ -997,6 +1000,15 @@ public class MainActivity extends Activity {
         cmpTeleField("telephony.operatorName", eName, oName, err, true);
         cmpTeleField("telephony.operatorNumeric", eNum, oNum, err, false);
         cmpTeleField("telephony.countryIso", eIso, oIso, err, true);
+        if (err != null) {
+            cmpRow("telephony.networkType", eNt < 0 ? null : networkTypeName(eNt), err,
+                    Cmp.UNKNOWN);
+        } else if (eNt < 0) {
+            cmpRow("telephony.networkType", null, networkTypeName(oNt), Cmp.UNKNOWN);
+        } else {
+            cmpRow("telephony.networkType", networkTypeName(eNt), networkTypeName(oNt),
+                    eNt == oNt ? Cmp.PASS : Cmp.FAIL);
+        }
     }
 
     private void cmpTeleField(String field, String expected, String observed, String err,

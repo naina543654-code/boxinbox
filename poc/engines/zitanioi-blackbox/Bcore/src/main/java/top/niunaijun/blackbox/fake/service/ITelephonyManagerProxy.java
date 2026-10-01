@@ -274,8 +274,8 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
      * Track B: data/voice network type. On API 24+ TelephonyManager
      * getDataNetworkType() calls ITelephony.getDataNetworkTypeForSubscriber,
      * which had no hook at all, so the guest always saw the real type.
-     * Spoofed value is LTE (the most common type); a spoof profile could make
-     * this per-identity later. Inactive profile -> pass through.
+     * Spoofed value is the per-identity profile's networkType (randomized at
+     * identity creation). Inactive profile -> pass through.
      */
     @ProxyMethods({"getDataNetworkType", "getDataNetworkTypeForSubscriber"})
     public static class GetDataNetworkType extends MethodHook {
@@ -283,7 +283,10 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             BSpoofManager spoof = BSpoofManager.get();
             if (spoof.isSpoofActive()) {
-                return TelephonyManager.NETWORK_TYPE_LTE;
+                int nt = spoof.getNetworkType();
+                if (nt >= 0) {
+                    return nt;
+                }
             }
             try {
                 return method.invoke(who, args);
@@ -299,7 +302,10 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             BSpoofManager spoof = BSpoofManager.get();
             if (spoof.isSpoofActive()) {
-                return TelephonyManager.NETWORK_TYPE_LTE;
+                int nt = spoof.getNetworkType();
+                if (nt >= 0) {
+                    return nt;
+                }
             }
             try {
                 return method.invoke(who, args);

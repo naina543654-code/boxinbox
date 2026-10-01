@@ -1,6 +1,7 @@
 package com.sandboxpoc.hostruntime.identity
 
 import android.os.Build
+import android.telephony.TelephonyManager
 import com.sandboxpoc.hostruntime.profile.DeviceProfile
 import com.sandboxpoc.hostruntime.profile.SpoofProfile
 import java.security.SecureRandom
@@ -307,6 +308,7 @@ object ProfileGenerator {
                 countryIso = city.countryIso,
                 deviceId = newAndroidId(),
                 subscriberId = newSubscriberId(operator.numeric.take(3)),
+                networkType = newNetworkType(),
             ),
         )
     }
@@ -319,6 +321,18 @@ object ProfileGenerator {
     fun newSubscriberId(mcc: String = ""): String {
         val tail = CharArray(15 - mcc.length) { DIGITS[random.nextInt(10)] }.concatToString()
         return mcc + tail
+    }
+
+    /**
+     * Per-identity radio network type, weighted toward what real phones
+     * report: mostly LTE, sometimes NR (5G), occasionally HSPA.
+     */
+    fun newNetworkType(): Int {
+        return when (random.nextInt(100)) {
+            in 0 until 60 -> TelephonyManager.NETWORK_TYPE_LTE
+            in 60 until 85 -> TelephonyManager.NETWORK_TYPE_NR
+            else -> TelephonyManager.NETWORK_TYPE_HSPA
+        }
     }
 
     /**

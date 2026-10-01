@@ -98,6 +98,7 @@ public class BSpoofManager {
     private String mCountryIso;
     private String mTelephonyDeviceId;
     private String mSubscriberId;
+    private int mNetworkType = 13; // TelephonyManager.NETWORK_TYPE_LTE
 
     public static BSpoofManager get() {
         return sInstance;
@@ -204,6 +205,15 @@ public class BSpoofManager {
     public String getSubscriberId() {
         ensureLoaded();
         return mSpoofActive ? mSubscriberId : null;
+    }
+
+    /**
+     * Track B: per-identity radio network type from the spoof profile.
+     * Returns -1 when no spoof is active or no valid value was staged.
+     */
+    public int getNetworkType() {
+        ensureLoaded();
+        return (mSpoofActive && mNetworkType >= 0) ? mNetworkType : -1;
     }
 
     /**
@@ -331,6 +341,7 @@ public class BSpoofManager {
             mCountryIso = telephony.optString("countryIso", null);
             mTelephonyDeviceId = telephony.optString("deviceId", null);
             mSubscriberId = telephony.optString("subscriberId", null);
+            mNetworkType = telephony.optInt("networkType", 13);
         }
     }
 
