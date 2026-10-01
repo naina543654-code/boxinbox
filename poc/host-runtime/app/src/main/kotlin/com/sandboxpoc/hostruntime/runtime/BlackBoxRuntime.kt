@@ -132,18 +132,19 @@ class BlackBoxRuntime : SandboxRuntime {
         val result = core().installPackageAsUser(base, VIRTUAL_USER_ID)
         check(result.success) { "engine install failed: ${result.msg}" }
         // Split APKs (config/density splits of bundle-distributed apps) are
-        // copied next to base.apk as split_<i>.apk. The engine exposes them
-        // via ApplicationInfo.splitSourceDirs so the framework's LoadedApk
-        // loads split resources with AssetManager. Stale splits from a
-        // previous version are removed first.
+        // copied next to base.apk preserving their original split_<name>.apk
+        // filenames, so the engine can derive the real split names for
+        // ApplicationInfo.splitNames. The framework's LoadedApk then loads
+        // split resources with AssetManager. Stale splits from a previous
+        // version are removed first.
         val codeDir = BEnvironment.getBaseApkDir(result.packageName).parentFile
             ?: throw IllegalStateException("no code dir for ${result.packageName}")
         codeDir.listFiles { f -> f.isFile && f.name.startsWith("split_") && f.name.endsWith(".apk") }
             ?.forEach { it.delete() }
-        apkPaths.drop(1).forEachIndexed { i, sp ->
+        apkPaths.drop(1).forEach { sp ->
             val src = File(sp)
             require(src.isFile) { "split APK not found: $sp" }
-            src.copyTo(File(codeDir, "split_$i.apk"), overwrite = true)
+            src.copyTo(File(codeDir, src.name), overwrite = true)
         }
     }
 
