@@ -55,6 +55,7 @@ import top.niunaijun.blackbox.fake.service.libcore.OsStub;
 import top.niunaijun.blackbox.fake.spoof.BSpoofManager;
 import top.niunaijun.blackbox.fake.spoof.SensorSpoofInjector;
 import top.niunaijun.blackbox.fake.spoof.SysPropSpoofInjector;
+import top.niunaijun.blackbox.fake.spoof.TelephonyApiSpoofInjector;
 import top.niunaijun.blackbox.fake.spoof.RootHideInjector;
 import top.niunaijun.blackbox.utils.Slog;
 import top.niunaijun.blackbox.utils.compat.BuildCompat;
@@ -113,6 +114,13 @@ public class HookManager {
             // making binder calls, so the ITelephonyManagerProxy hooks never
             // fire for them. No-op without an active profile.
             addInjector(new SysPropSpoofInjector());
+            // Track B: spoof telephony operator identity at the TelephonyManager
+            // public-API choke point. getNetworkOperatorName()/getNetworkOperator()
+            // neither hit the ITelephony binder proxy nor the hooked
+            // SystemProperties.get() overloads on the guest framework build
+            // (verified on-device), so hook the exact methods apps call.
+            // No-op without an active profile.
+            addInjector(new TelephonyApiSpoofInjector());
             addInjector(new RootHideInjector());
             addInjector(new IStorageManagerProxy());
             addInjector(new ILauncherAppsProxy());
