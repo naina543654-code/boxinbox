@@ -76,6 +76,17 @@ public class BSpoofManager {
     private static final BSpoofManager sInstance = new BSpoofManager();
 
     private boolean mLoaded;
+    /**
+     * Re-entrancy guard for {@link #ensureLoaded()}. The profile bootstrap can
+     * trigger hooked APIs on this same thread (e.g. {@code Context.getFilesDir()}
+     * internally calls {@code File.exists()}, which the root-hide hook
+     * intercepts and routes back through {@link #isSpoofActive()} →
+     * {@link #ensureLoaded()}). Without this guard the engine recurses until
+     * Android kills the process for a provider-publication timeout (sandbox
+     * freezes on the logo). A re-entrant call simply bails out; the outer
+     * call completes the load.
+     */
+    private boolean mLoading;
     private boolean mSpoofActive;
 
     private final Map<String, String> mBuildFields = new HashMap<>();
@@ -259,20 +270,31 @@ public class BSpoofManager {
     }
 
     private synchronized void ensureLoaded() {
-        if (mLoaded) {
+        if (mLoaded || mLoading) {
             return;
         }
         // NOTE: mLoaded is only set after a successful parse. A missing
         // context, missing file, or parse failure leaves mLoaded=false so the
         // next hook call retries — a transient early-init state must never
         // permanently disable spoofing for the life of the process.
+        mLoading = true;
         try {
             Context hostContext = BlackBoxCore.getContext();
             if (hostContext == null) {
                 Slog.w(TAG, "ensureLoaded: host context not ready yet — will retry");
                 return;
             }
-            File profileFile = new File(hostContext.getFilesDir(), PROFILE_REL_PATH);
+            // Resolve the profile path WITHOUT calling Context.getFilesDir() /
+            // getDataDir(): on some framework builds those internally call
+            // File.exists(), which our own root-hide hook intercepts and routes
+            // back here (see mLoading). applicationInfo.dataDir is a plain
+            // field read — no method dispatch, no hook re-entry.
+            String dataDir = hostContext.getApplicationInfo().dataDir;
+            if (dataDir == null) {
+                Slog.w(TAG, "ensureLoaded: applicationInfo.dataDir null — will retry");
+                return;
+            }
+            File profileFile = new File(dataDir + "/files", PROFILE_REL_PATH);
             if (!profileFile.isFile()) {
                 Slog.d(TAG, "ensureLoaded: no profile at " + profileFile.getAbsolutePath()
                         + " — spoofing inactive, hooks pass through (will retry)");
@@ -287,6 +309,8 @@ public class BSpoofManager {
         } catch (Throwable t) {
             Slog.w(TAG, "ensureLoaded: failed to parse spoof profile — spoofing inactive (will retry)", t);
             mSpoofActive = false;
+        } finally {
+            mLoading = false;
         }
     }
 
