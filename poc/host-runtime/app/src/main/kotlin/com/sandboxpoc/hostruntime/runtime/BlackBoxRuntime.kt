@@ -189,7 +189,11 @@ class BlackBoxRuntime : SandboxRuntime {
     }
 
     override fun uninstallApplication(packageName: String) = attempt("uninstall") {
+        // Before/after logging: if the "calling" line appears in logcat
+        // without the "returned" line, the engine call is stuck (not failed).
+        Log.i(TAG_WIPE, "uninstall: calling uninstallPackageAsUser($packageName, $VIRTUAL_USER_ID)")
         core().uninstallPackageAsUser(packageName, VIRTUAL_USER_ID)
+        Log.i(TAG_WIPE, "uninstall: uninstallPackageAsUser($packageName) returned")
     }
 
     override fun launchApplication(packageName: String) = attempt("launch") {
@@ -226,7 +230,10 @@ class BlackBoxRuntime : SandboxRuntime {
      * getInstalledPackages hides GMS clones, so "uninstall everything
      * listed" misses them.
      *
-     * This wipe therefore trusts nothing: the engine's deleteUser runs
+     * This wipe therefore trusts nothing: it first heals the engine's
+     * user record (a previous failed wipe can remove user 0 from the
+     * engine's user table, which turns every later uninstallPackageAsUser
+     * into a silent no-op); then the engine's deleteUser runs
      * first (one full pass); anything its loop missed gets an isolated
      * per-package uninstall; GMS goes through the engine's own
      * uninstaller; every on-disk location is force-cleared with an
@@ -238,6 +245,22 @@ class BlackBoxRuntime : SandboxRuntime {
     private fun wipeVirtualUser() {
         // Anomalies seen along the way (diagnostic context only).
         val issues = mutableListOf<String>()
+
+        // 0. Heal the engine's user record FIRST. A previous failed wipe
+        //    may have removed user 0 from the engine's user table while
+        //    leaving packages behind; in that state every
+        //    uninstallPackageAsUser is a SILENT NO-OP (the engine's
+        //    isInstalled() returns false for an unknown user), which is
+        //    exactly "uninstall/delete/reset all do nothing". createUser
+        //    is idempotent: a no-op when the user already exists.
+        Log.i(TAG_WIPE, "phase=ensure-user: calling createUser($VIRTUAL_USER_ID)")
+        runCatching { users().createUser(VIRTUAL_USER_ID) }
+            .onSuccess { Log.i(TAG_WIPE, "phase=ensure-user: user record present") }
+            .onFailure {
+                Log.w(TAG_WIPE, "phase=ensure-user: createUser threw: " +
+                    "${it::class.java.simpleName}: ${it.message}")
+                issues += "createUser threw: ${it.message}"
+            }
 
         Log.i(TAG_WIPE, "phase=collect")
         // Packages from the engine list (GMS-filtered) plus every on-disk
@@ -260,9 +283,13 @@ class BlackBoxRuntime : SandboxRuntime {
         //    internal loop aborts on the first bad package, so steps 3-5
         //    clean up whatever it missed. Runs first so the common case
         //    costs one pass instead of three.
-        Log.i(TAG_WIPE, "phase=engine-delete-user")
+        Log.i(TAG_WIPE, "phase=engine-delete-user: calling deleteUser($VIRTUAL_USER_ID)")
         runCatching { users().deleteUser(VIRTUAL_USER_ID) }
-            .onFailure { issues += "engine deleteUser threw: ${it.message}" }
+            .onSuccess { Log.i(TAG_WIPE, "phase=engine-delete-user: returned cleanly") }
+            .onFailure {
+                Log.w(TAG_WIPE, "phase=engine-delete-user: threw: ${it.message}")
+                issues += "engine deleteUser threw: ${it.message}"
+            }
 
         // 3. Isolated per-package uninstall for whatever the engine's loop
         //    left behind — one bad package must not abort the rest.
@@ -287,9 +314,13 @@ class BlackBoxRuntime : SandboxRuntime {
         // 5. Retry the engine deleteUser now that packages are gone: its
         //    loop is empty, so this only finishes the bookkeeping (user
         //    record, data/user/0, external dir) when step 2 bailed early.
-        Log.i(TAG_WIPE, "phase=engine-delete-user-retry")
+        Log.i(TAG_WIPE, "phase=engine-delete-user-retry: calling deleteUser($VIRTUAL_USER_ID)")
         runCatching { users().deleteUser(VIRTUAL_USER_ID) }
-            .onFailure { issues += "engine deleteUser retry threw: ${it.message}" }
+            .onSuccess { Log.i(TAG_WIPE, "phase=engine-delete-user-retry: returned cleanly") }
+            .onFailure {
+                Log.w(TAG_WIPE, "phase=engine-delete-user-retry: threw: ${it.message}")
+                issues += "engine deleteUser retry threw: ${it.message}"
+            }
 
         // 6. Scorched earth: force-remove every on-disk location that can
         //    hold user-0 state — including ones the engine only reaches via
@@ -307,6 +338,23 @@ class BlackBoxRuntime : SandboxRuntime {
         val dirSurvivors = mutableListOf<String>()
         for (d in targets) {
             if (!deleteTree(d)) dirSurvivors += d.absolutePath
+        }
+        // One retry: a persistent guest process (notably GMS) can respawn
+        // between the kill and the sweep and recreate its dirs. Re-kill,
+        // then immediately re-sweep only the survivors; anything still
+        // standing after that is genuinely stuck and fails loudly below.
+        if (dirSurvivors.isNotEmpty()) {
+            Log.w(TAG_WIPE, "phase=sweep-retry survivors=${dirSurvivors.size}: " +
+                dirSurvivors.joinToString(","))
+            for (pkg in pkgs) {
+                runCatching { core().stopPackage(pkg, VIRTUAL_USER_ID) }
+            }
+            val retry = dirSurvivors.toList()
+            dirSurvivors.clear()
+            for (path in retry) {
+                if (!deleteTree(File(path))) dirSurvivors += path
+            }
+            Log.i(TAG_WIPE, "phase=sweep-retry done, survivors=${dirSurvivors.size}")
         }
 
         // 7. In-memory verification: nothing still registered for user 0.
