@@ -48,6 +48,11 @@ android {
 
 tasks.register("generateVersionRes") {
     def outDir = layout.buildDirectory.dir("generated/versionRes/values")
+    // Declare the stamp as inputs: without them Gradle's up-to-date check
+    // skips this task after the first build and the footer keeps showing
+    // the PREVIOUS checkout's SHA (versionName stays fresh, footer stale).
+    inputs.property("buildSha", buildSha)
+    inputs.property("buildDate", buildDate)
     outputs.dir(outDir)
     doLast {
         outDir.get().asFile.mkdirs()

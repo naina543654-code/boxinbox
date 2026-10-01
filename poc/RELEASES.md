@@ -102,3 +102,9 @@ see `poc/SPOOFING_MATRIX.md` for the verification matrix.
 - Root cause: `newLocalMac()` only set the locally-administered bit, producing first bytes like 06/0A/12.. ~15/16 of the time, but `ProfileValidator.LOCAL_MAC_RE` requires exactly `02:`.
 - Generator now forces first byte `0x02`; verified 2000/2000 generated MACs pass the validator.
 - Rebuilt host APK stamped `87c33e6 (2026-10-01)`. Probe unchanged.
+
+## 2026-10-02 (post-92c85f9) — stale-AAR trap + footer staleness (build fixes)
+- On-device evidence: fresh identity generates fine (MAC fix works), but every 89edc0b/97497ff spoof row FAILs and Delete/Reset broke again on Jason's self-built host. Root cause: his Gradle build consumed an untracked hand-copied `app/libs/Bcore-release.aar` — `git pull` never refreshes it, so his host APK (sources at HEAD) ran a pre-89edc0b engine. The tracked `poc/engine/Bcore-release.aar` contains all new hook classes (verified in classes.jar: BSpoofOsIdentity, BSpoofSensors, BSpoofJvmProps, ...), md5 05d106998c1f140b44ceac778d37223e.
+- host-runtime Gradle now depends on `../../engine/Bcore-release.aar` directly — the app/libs copy step (and its staleness trap) is gone.
+- `generateVersionRes` (probe + host) now declares buildSha/buildDate as task inputs. Without inputs, Gradle's up-to-date check skipped the task after the first build: versionName (configuration-time) refreshed while the footer froze at the old SHA.
+- Source-only changes (Gradle build files); shipped APKs in poc/apks/ are unaffected.

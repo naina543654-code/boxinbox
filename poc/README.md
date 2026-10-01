@@ -25,8 +25,9 @@ cd host/        && ./gradlew assembleDebug
 cd host-runtime/ && ./gradlew assembleDebug
 ```
 
-`host-runtime` needs the engine AAR in `app/libs/Bcore-release.aar`
-(checked in, 4.1 MB). To rebuild it from engine source:
+`host-runtime` consumes the engine AAR directly from `engine/Bcore-release.aar`
+(checked in; the Gradle build references that path so pulls always update it).
+To rebuild the AAR from engine source:
 `cd engine && ./build-aar-manual.sh all` — requires the NDK.
 
 Note: `./gradlew` downloads the Gradle 8.10.2 distribution on first run —

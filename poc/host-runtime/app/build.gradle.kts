@@ -49,6 +49,11 @@ android {
 
 val generateVersionRes by tasks.registering {
     val outDir = layout.buildDirectory.dir("generated/versionRes/values")
+    // Declare the stamp as inputs: without them Gradle's up-to-date check
+    // skips this task after the first build and the footer keeps showing
+    // the PREVIOUS checkout's SHA (versionName stays fresh, footer stale).
+    inputs.property("buildSha", buildSha)
+    inputs.property("buildDate", buildDate)
     outputs.dir(outDir)
     doLast {
         outDir.get().asFile.mkdirs()
@@ -62,9 +67,11 @@ tasks.named("preBuild") { dependsOn(generateVersionRes) }
 
 dependencies {
     // BlackBox engine, built from source (zitanioi/blackbox) via
-    // ../engine/build-aar-manual.sh. Rebuild the AAR on a normal machine
-    // with: cd ../engine && ./build-aar-manual.sh all
-    implementation(files("libs/Bcore-release.aar"))
+    // ../engine/build-aar-manual.sh. Consumed DIRECTLY from the tracked
+    // engine/ tree so a `git pull` always brings the current engine —
+    // a hand-copied app/libs/Bcore-release.aar silently goes stale
+    // (caused the 2026-10-02 stale-spoof + broken-wipe episode).
+    implementation(files("../../engine/Bcore-release.aar"))
     // Engine runtime dependencies (also baked into the manual APK build):
     // BlackReflection shim (JitPack) + FreeReflection (JitPack, official
     // tiann artifact — the me.weishu:free_reflection:3.0.1 coordinate the
