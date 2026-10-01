@@ -190,15 +190,52 @@ class BlackBoxRuntime : SandboxRuntime {
     }
 
     override fun reset() = attempt("reset") {
-        // Clean guest state = drop the whole virtual user and recreate it.
-        runCatching { users().deleteUser(VIRTUAL_USER_ID) }
+        // Clean guest state = fully wipe the virtual user, then recreate it.
+        wipeVirtualUser()
         users().createUser(VIRTUAL_USER_ID)
         state = RuntimeStatus.ACTIVE
     }
 
     override fun destroy() = attempt("destroy") {
-        runCatching { users().deleteUser(VIRTUAL_USER_ID) }
+        wipeVirtualUser()
         state = RuntimeStatus.DESTROYED
+    }
+
+    /**
+     * Fully remove the virtual user and everything in it.
+     *
+     * Bug history: this used to be `runCatching { deleteUser(..) }` — any
+     * failure (engine hiccup, files locked by a still-running guest) was
+     * silently swallowed while the app reported "identity deleted". The next
+     * identity then reused the never-deleted virtual user, so old cloned apps
+     * and their data survived the delete. Failures are now surfaced, and the
+     * wipe is verified instead of assumed.
+     */
+    private fun wipeVirtualUser() {
+        // 1. Best-effort: stop running guests so open files don't block deletion.
+        val installed = runCatching { installedGuestPackages() }.getOrDefault(emptyList())
+        for (pkg in installed) {
+            runCatching { core().stopPackage(pkg, VIRTUAL_USER_ID) }
+        }
+        // 2. Best-effort: uninstall every cloned package (removes APK code
+        //    dirs and per-user data, including GMS clones).
+        for (pkg in runCatching { installedGuestPackages() }.getOrDefault(emptyList())) {
+            runCatching { core().uninstallPackageAsUser(pkg, VIRTUAL_USER_ID) }
+        }
+        // 3. Delete the virtual user itself. Deliberately NOT swallowed: if
+        //    this throws, the identity must not be reported as deleted.
+        users().deleteUser(VIRTUAL_USER_ID)
+        // 4. Verify the engine actually wiped the dirs; force-remove leftovers.
+        val userDir = BEnvironment.getUserDir(VIRTUAL_USER_ID)
+        if (userDir.exists()) {
+            userDir.deleteRecursively()
+            check(!userDir.exists()) { "virtual user dir survived deletion: $userDir" }
+        }
+        val extDir = BEnvironment.getExternalUserDir(VIRTUAL_USER_ID)
+        if (extDir.exists()) {
+            extDir.deleteRecursively()
+            check(!extDir.exists()) { "virtual external dir survived deletion: $extDir" }
+        }
     }
 
     override fun getStatus(): RuntimeStatus = state
