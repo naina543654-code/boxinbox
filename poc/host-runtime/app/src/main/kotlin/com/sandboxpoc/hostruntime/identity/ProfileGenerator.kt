@@ -54,9 +54,16 @@ object ProfileGenerator {
     /**
      * Builds a full [SpoofProfile] from a coherent device-table row plus
      * fresh per-identity values.
+     *
+     * @param avoidFingerprint when resetting, the previous identity's
+     * device fingerprint — the generator re-rolls so the new identity is
+     * never the same device model twice in a row.
      */
-    fun newProfile(profileId: String = UUID.randomUUID().toString()): SpoofProfile {
-        val row = pickRow()
+    fun newProfile(
+        profileId: String = UUID.randomUUID().toString(),
+        avoidFingerprint: String? = null,
+    ): SpoofProfile {
+        val row = pickRow(avoidFingerprint)
         val device = SpoofProfile.DeviceInfo(
             manufacturer = row.manufacturer,
             brand = row.brand,
@@ -106,15 +113,35 @@ object ProfileGenerator {
     /**
      * Prefers device rows whose apiLevel equals the host's SDK_INT (so the
      * spoofed device plausibly matches the OS the guest actually runs on);
-     * falls back to the row with the nearest apiLevel.
+     * falls back to a random row among those with the nearest apiLevel.
+     * The fallback MUST randomize: picking the first nearest row made every
+     * identity on an API-33 host a Pixel 8 (first API-34 row in the table).
      */
-    private fun pickRow(): DeviceProfile {
+    private fun pickRow(avoidFingerprint: String? = null): DeviceProfile {
         val table = DeviceProfile.DEVICE_TABLE
         val hostApi = Build.VERSION.SDK_INT
         val exact = table.filter { it.apiLevel == hostApi }
-        if (exact.isNotEmpty()) return exact[random.nextInt(exact.size)]
-        return table.minByOrNull { kotlin.math.abs(it.apiLevel - hostApi) }
-            ?: table.first()
+        if (exact.isNotEmpty()) return distinctRandom(exact, avoidFingerprint)
+        val nearest = table.minOf { kotlin.math.abs(it.apiLevel - hostApi) }
+        val candidates = table.filter { kotlin.math.abs(it.apiLevel - hostApi) == nearest }
+        return distinctRandom(candidates, avoidFingerprint)
+    }
+
+    /**
+     * Random pick that avoids re-rolling the previous identity's device
+     * model (so generate/reset never hands back the same phone twice in a
+     * row). Falls back to the full pool when every candidate is excluded.
+     */
+    private fun distinctRandom(
+        candidates: List<DeviceProfile>,
+        avoidFingerprint: String?,
+    ): DeviceProfile {
+        val pool = if (avoidFingerprint != null) {
+            candidates.filter { it.fingerprint != avoidFingerprint }.ifEmpty { candidates }
+        } else {
+            candidates
+        }
+        return pool[random.nextInt(pool.size)]
     }
 
     /** Virtual location: base point + per-profile jitter; movement disabled. */

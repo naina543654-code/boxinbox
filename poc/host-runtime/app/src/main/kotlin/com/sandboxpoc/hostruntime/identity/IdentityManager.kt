@@ -79,10 +79,13 @@ class IdentityManager(
         log.i("identity", "deleted profile + guest state for ${existing.id}")
 
         val identityId = UUID.randomUUID().toString()
-        var spoof = ProfileGenerator.newProfile(profileId = identityId)
+        val avoidFingerprint = existing.spoofProfile.device.fingerprint
+        var spoof = ProfileGenerator.newProfile(
+            profileId = identityId, avoidFingerprint = avoidFingerprint)
         var guard = 0
         while (spoof.androidId == existing.spoofProfile.androidId && guard++ < 10) {
-            spoof = ProfileGenerator.newProfile(profileId = identityId)
+            spoof = ProfileGenerator.newProfile(
+                profileId = identityId, avoidFingerprint = avoidFingerprint)
         }
         check(spoof.androidId != existing.spoofProfile.androidId) {
             "Reset produced an identical androidId — refusing to continue"
