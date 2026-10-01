@@ -12,6 +12,9 @@ import com.sandboxpoc.hostruntime.profile.SpoofProfile
  * - [validateSpoof]: full checks for the per-identity [SpoofProfile]
  *   (device coherence via [validate], plus location ranges, sensor types,
  *   network and telephony formats).
+ * - [validateDeviceTable]: whole-table checks — API 33/34 only, fingerprint
+ *   version segment and buildId coherent with the row, no duplicate
+ *   fingerprints.
  *
  * Called on every generate/reset before the profile is persisted; the
  * identity is rejected if violations exist.
@@ -36,7 +39,7 @@ object ProfileValidator {
         if (profile.board.isBlank()) violations += "board is blank"
         if (profile.hardware.isBlank()) violations += "hardware is blank"
         if (profile.buildId.isBlank()) violations += "buildId is blank"
-        if (!SECURITY_PATCH_RE.matches(profile.securityPatch)) {
+        if (profile.securityPatch != "unknown" && !SECURITY_PATCH_RE.matches(profile.securityPatch)) {
             violations += "securityPatch '${profile.securityPatch}' is not YYYY-MM-DD"
         }
 
@@ -164,6 +167,34 @@ object ProfileValidator {
         }
         if (sp.telephony.countryIso.isBlank()) violations += "telephony.countryIso is blank"
 
+        return violations
+    }
+
+    /**
+     * Whole-table checks for [DeviceProfile.DEVICE_TABLE]: every row passes
+     * [validate], apiLevel is 33 or 34 only, the fingerprint's version
+     * segment matches the row's androidVersion, the buildId sits inside the
+     * fingerprint, and no two rows share a fingerprint.
+     */
+    fun validateDeviceTable(): List<String> {
+        val violations = mutableListOf<String>()
+        val seen = mutableSetOf<String>()
+        for (row in DeviceProfile.DEVICE_TABLE) {
+            violations += validate(row).map { "${row.model}: $it" }
+            if (row.apiLevel != 33 && row.apiLevel != 34) {
+                violations += "${row.model}: apiLevel ${row.apiLevel} not in (33, 34)"
+            }
+            val versionSeg = row.fingerprint.substringAfter(":").substringBefore("/")
+            if (versionSeg != row.androidVersion) {
+                violations += "${row.model}: fingerprint :$versionSeg/ != androidVersion ${row.androidVersion}"
+            }
+            if (!row.fingerprint.contains("/${row.buildId}/")) {
+                violations += "${row.model}: buildId '${row.buildId}' not inside fingerprint"
+            }
+            if (!seen.add(row.fingerprint)) {
+                violations += "${row.model}: duplicate fingerprint"
+            }
+        }
         return violations
     }
 }
