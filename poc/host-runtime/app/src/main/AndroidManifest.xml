@@ -14,6 +14,7 @@
     <application
         android:name=".SandboxApp"
         android:label="Sandbox PoC (Runtime)"
+        android:icon="@mipmap/ic_launcher"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:allowBackup="false"
         android:supportsRtl="true">

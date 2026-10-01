@@ -56,8 +56,14 @@ public class DaemonService extends Service {
         // startForeground() with an iconless notification throws
         // RemoteServiceException$CannotPostForegroundServiceNotificationException
         // ("Bad notification for startForeground"), killing the :black daemon process.
+        // Use the host app's launcher icon so the notification shows the real app
+        // logo; fall back to a framework icon if the host declares none.
+        int icon = getApplicationInfo().icon;
+        if (icon == 0) {
+            icon = android.R.drawable.ic_dialog_info;
+        }
         NotificationCompat.Builder builder = new NotificationCompat.Builder(getApplicationContext(), getPackageName() + ".blackbox_core")
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setSmallIcon(icon)
                 .setContentTitle("Privacy Sandbox")
                 .setContentText("Sandbox runtime is active")
                 .setPriority(NotificationCompat.PRIORITY_MAX);

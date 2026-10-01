@@ -18,6 +18,7 @@
 
     <application
         android:label="SandboxProbe"
+        android:icon="@mipmap/ic_launcher"
         android:theme="@android:style/Theme.Material.Light"
         android:allowBackup="false"
         android:supportsRtl="true">
