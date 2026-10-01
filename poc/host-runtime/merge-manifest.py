@@ -51,6 +51,12 @@ def main(host_path, engine_path, out_path, app_id):
     engine = ET.parse(engine_path)
     hroot, eroot = host.getroot(), engine.getroot()
 
+    # aapt2 link requires a package attribute on <manifest>; the host
+    # manifest is AGP-style (no package=, applicationId comes from the
+    # build), so inject it here to mirror what AGP would produce.
+    if hroot.get("package") is None:
+        hroot.set("package", app_id)
+
     # 1. permissions
     existing = {p.get(a("name")) for p in hroot.findall("uses-permission")}
     added_perm = 0

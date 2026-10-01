@@ -5,10 +5,14 @@ import android.util.Log
 import top.niunaijun.blackbox.BlackBoxCore
 import top.niunaijun.blackbox.core.GmsCore
 import top.niunaijun.blackbox.core.env.BEnvironment
-import top.niunaijun.blackbox.core.system.pm.BPackageManagerService
 import top.niunaijun.blackbox.core.system.user.BUserManagerService
+import top.niunaijun.blackbox.fake.frameworks.BPackageManager
+import top.niunaijun.blackbox.fake.frameworks.BUserManager
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 /**
  * [SandboxRuntime] backed by the BlackBox application-virtualization engine
@@ -50,10 +54,54 @@ class BlackBoxRuntime : SandboxRuntime {
         const val VIRTUAL_USER_ID = 0
         /** Logcat tag for wipe phase markers (delete/reset diagnostics). */
         private const val TAG_WIPE = "BoxInBoxWipe"
+        /** Worker pool for timeout-guarded engine IPC (see [ipc]). */
+        private val IpcExec = Executors.newCachedThreadPool()
     }
 
     @Volatile private var state: RuntimeStatus = RuntimeStatus.NOT_CREATED
     @Volatile private var lastError: String? = null
+
+    /**
+     * Thrown by [ipc] when the daemon does not answer within the timeout.
+     * Distinct from other failures so callers can fail fast on a wedged
+     * daemon instead of burning one timeout per package.
+     */
+    class IpcTimeoutException(message: String) : IllegalStateException(message)
+
+    /**
+     * Run a Binder IPC against the engine daemon with a hard timeout.
+     *
+     * Why: on 2026-10-01 Delete/Reset hung forever inside
+     * core().getInstalledPackages() — the :black daemon stopped answering
+     * Binder transactions (it ANR'd on "executing service DaemonService")
+     * and the wipe thread blocked with no toast, no crash, no trace past
+     * "phase=collect". A wedged daemon must FAIL LOUDLY (naming the stuck
+     * call) instead of hanging the wipe with zero feedback.
+     *
+     * Note: cancelling the future interrupts the worker, but an in-flight
+     * Binder transaction is not interruptible — a truly wedged daemon
+     * leaks one stuck worker thread per timed-out call. That is the price
+     * of not hanging the wipe thread; the user force-stops/relaunches
+     * anyway when the daemon is in that state.
+     */
+    private fun <T> ipc(name: String, timeoutSec: Long, block: () -> T): T {
+        val fut = IpcExec.submit<T> { block() }
+        try {
+            return fut.get(timeoutSec, TimeUnit.SECONDS)
+        } catch (e: TimeoutException) {
+            fut.cancel(true)
+            throw IpcTimeoutException(
+                "wipe aborted: engine call '$name' timed out after ${timeoutSec}s " +
+                    "— daemon not responding (last trace lines in filesDir/wipe-trace.log)")
+        } catch (e: java.util.concurrent.ExecutionException) {
+            val cause = e.cause
+            throw IllegalStateException(
+                "wipe aborted: engine call '$name' failed: ${cause?.message}", cause)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw IllegalStateException("wipe aborted: engine call '$name' interrupted")
+        }
+    }
 
     /** Last engine error, for diagnostics. Null when the last op succeeded. */
     fun lastError(): String? = lastError
@@ -61,7 +109,12 @@ class BlackBoxRuntime : SandboxRuntime {
     /** Package names installed in the virtual user (UI helper; not part of the 10-method contract). */
     fun installedGuestPackages(): List<String> {
         checkBackground()
-        return core().getInstalledPackages(0, VIRTUAL_USER_ID).map { it.packageName }.sorted()
+        // Timeout-guarded: a wedged daemon must surface as an exception
+        // (the Manage Identity caller falls back to an empty list) rather
+        // than hanging the listing thread forever.
+        return ipc("getInstalledPackages", 20) {
+            core().getInstalledPackages(0, VIRTUAL_USER_ID).map { it.packageName }.sorted()
+        }
     }
 
     /** Whether the engine's GMS packages live in the virtual user (UI helper). */
@@ -153,8 +206,8 @@ class BlackBoxRuntime : SandboxRuntime {
     }
 
     override fun stop() = attempt("stop") {
-        for (pkg in core().getInstalledPackages(0, VIRTUAL_USER_ID)) {
-            try { core().stopPackage(pkg.packageName, VIRTUAL_USER_ID) } catch (_: Exception) { }
+        for (pkg in ipc("getInstalledPackages", 20) { core().getInstalledPackages(0, VIRTUAL_USER_ID) }) {
+            try { ipc("stopPackage", 10) { core().stopPackage(pkg.packageName, VIRTUAL_USER_ID) } } catch (_: Exception) { }
         }
         state = RuntimeStatus.STOPPED
     }
@@ -234,41 +287,63 @@ class BlackBoxRuntime : SandboxRuntime {
      * listed" misses them.
      *
      * This wipe therefore trusts nothing: it first heals the engine's
-     * user record (a previous failed wipe can remove user 0 from the
-     * engine's user table, which turns every later uninstallPackageAsUser
-     * into a silent no-op); then every package gets an isolated
-     * per-package uninstall while user 0 still exists; GMS goes through
-     * the engine's own uninstaller; the engine's deleteUser runs LAST and
-     * only for bookkeeping — its internal loop removes packages from the
-     * ArrayMap it is iterating, silently skipping half of them, so it
-     * must never be the primary uninstall path; every on-disk location
-     * is force-cleared with an iterative deleter (no recursion — deep
-     * GMS trees); the user record is re-created before verification
-     * (the engine's list queries false-pass when the user is absent);
-     * and the result is VERIFIED. Anything surviving is reported by name
-     * instead of silently kept. Each phase logs to logcat (tag
-     * BoxInBoxWipe) so a slow or stuck wipe shows exactly where it is.
+     * user record through the Binder proxy (a previous failed wipe can
+     * remove user 0 from the daemon's user table, which turns every later
+     * uninstallPackageAsUser into a silent no-op); then every package gets
+     * an isolated per-package uninstall while user 0 still exists; GMS goes
+     * through the engine's own uninstaller; the engine's deleteUser is
+     * SKIPPED — BUserManagerService.deleteUser takes mUserLock+mUsers while
+     * calling into BPackageManagerService.deleteUser (lock-order inversion,
+     * deadlock risk), its internal package loop removes entries from the
+     * ArrayMap it iterates (silently skipping packages), and it is
+     * redundant anyway (steps below remove every package and every data
+     * dir; the bare user record carries no package state); every on-disk
+     * location is force-cleared with an iterative deleter (no recursion —
+     * deep GMS trees); and the result is VERIFIED against a live daemon
+     * plus on-disk truth. Anything surviving is reported by name instead
+     * of silently kept. Each phase logs to logcat (tag BoxInBoxWipe) and
+     * to filesDir/wipe-trace.log so a slow or stuck wipe shows exactly
+     * where it is.
      */
     /**
      * Destroys ALL guest state for the virtual user, verified step by step.
      *
+     * Process-model lesson (2026-10-01, the hard one): this code runs in the
+     * HOST process, where the engine's service singletons
+     * (BPackageManagerService.get(), BUserManagerService.get()) are
+     * UNINITIALIZED PHANTOMS. SystemCallProvider — the component that runs
+     * BlackBoxSystem.startup() -> systemReady() and scans real state off
+     * disk — is declared android:process=":black", so it only ever runs in
+     * the daemon. The host-process copies never scan: their package/user
+     * maps are EMPTY. An earlier wipe revision "verified" against those
+     * empty maps, so every check trivially passed, and
+     * BUserManagerService.get().createUser() even WROTE the user config
+     * file from the host via AtomicFile, racing the daemon's own copy.
+     * => This wipe NEVER touches B*Service.get() in this process.
+     *
      * Hard lessons encoded here:
-     * - The engine's client-side proxies (BPackageManager) SILENTLY SWALLOW
-     *   RemoteException (uninstall = no-op, getInstalledPackages = empty
-     *   list), and the service's uninstallPackageAsUser SILENTLY RETURNS
-     *   when the package is missing / not installed for the user / XPOSED.
-     *   So every destructive step is verified IMMEDIATELY through the
-     *   engine's direct service singletons (no proxies), and any step that
-     *   had no effect FAILS LOUDLY naming the package — instead of limping
-     *   on to a meaningless end-of-wipe check.
-     * - The engine's deleteUser iterates the package ArrayMap while its own
-     *   uninstall removes entries from that same map, silently skipping
-     *   packages; it runs LAST and only for bookkeeping.
-     * - The engine's list queries false-pass when the user record is absent,
-     *   so the user is (re-)created and its existence VERIFIED before any
-     *   check that depends on it.
-     * - A file trace (filesDir/wipe-trace.log) records every phase, so a
-     *   hung or dead wipe thread still leaves evidence of where it stopped.
+     * - The engine's client-side proxies (BPackageManager, BUserManager)
+     *   SILENTLY SWALLOW RemoteException (uninstall = no-op,
+     *   getInstalledPackages = empty list, isInstalled = false), and the
+     *   service's uninstallPackageAsUser SILENTLY RETURNS when the package
+     *   is missing / not installed for the user / XPOSED. So every proxy
+     *   call runs inside ipc() with a HARD TIMEOUT — on 2026-10-01 the
+     *   daemon wedged (ANR "executing service DaemonService") and
+     *   getInstalledPackages blocked the wipe thread forever with no toast
+     *   and no trace past "phase=collect". A timed-out call now aborts
+     *   loudly naming the stuck call.
+     * - Swallowed failures make "empty list" ambiguous (dead daemon vs
+     *   genuinely clean), so final verification first PINGS the daemon's
+     *   Binder: only a daemon that answers is trusted when its package
+     *   list comes back empty. An unresponsive daemon fails the wipe as
+     *   INCONCLUSIVE instead of false-passing as clean.
+     * - On-disk state (BEnvironment paths) is host-local, needs no IPC,
+     *   and cannot be faked by a dead proxy: package collection starts
+     *   from a disk scan, and verification requires every collected app
+     *   dir to be gone from disk.
+     * - A file trace (filesDir/wipe-trace.log) records every phase with a
+     *   start AND end line per source, so a hung wipe thread still leaves
+     *   evidence of exactly which call it died in.
      */
     private fun wipeVirtualUser() {
         val traceFile = File(BlackBoxCore.getContext().filesDir, "wipe-trace.log")
@@ -280,89 +355,107 @@ class BlackBoxRuntime : SandboxRuntime {
             }
         }
 
-        // Direct service singletons — no swallowing proxies. If the engine
-        // never initialized, fail loudly instead of false-passing.
-        val pm = BPackageManagerService.get()
-        check(pm != null) { "wipe aborted: engine package service not initialized" }
-        fun userExists(): Boolean = runCatching { users().exists(VIRTUAL_USER_ID) }
-            .getOrDefault(false)
-        fun isInstalledDirect(pkg: String): Boolean = runCatching {
-            pm.isInstalled(pkg, VIRTUAL_USER_ID)
-        }.getOrDefault(false)
+        // NOTE: B*Service.get() singletons are NEVER touched in this process —
+        // they are uninitialized phantoms here (see KDoc above). All engine
+        // contact goes through the Binder proxies with hard timeouts.
+        val userMgr = BUserManager.get()
 
-        // 0. Heal the engine's user record FIRST, then VERIFY it exists. A
-        //    previous failed wipe may have removed user 0 while leaving
-        //    packages behind; in that state every uninstallPackageAsUser is
-        //    a SILENT NO-OP (isInstalled false for unknown user).
-        trace("phase=ensure-user: createUser($VIRTUAL_USER_ID)")
-        runCatching { users().createUser(VIRTUAL_USER_ID) }
-            .onFailure { trace("phase=ensure-user: createUser threw: ${it.message}") }
-        check(userExists()) {
-            "wipe aborted: virtual user $VIRTUAL_USER_ID missing after createUser — " +
-                "every uninstall would silently no-op"
+        // 0. Heal the DAEMON's user record FIRST, then VERIFY it exists. A
+        //    previous failed wipe may have removed user 0 from the daemon's
+        //    user table, which turns every later uninstallPackageAsUser
+        //    into a SILENT NO-OP (service returns early for unknown user).
+        //    Proxy createUser returns null when the IPC itself failed; the
+        //    getUsers check below is the real gate either way.
+        trace("phase=ensure-user: proxy createUser($VIRTUAL_USER_ID)")
+        val created = ipc("createUser", 15) { userMgr.createUser(VIRTUAL_USER_ID) }
+        trace("phase=ensure-user: createUser returned ${if (created != null) "user record" else "null (IPC failed or user absent)"}")
+        val daemonUsers = ipc("getUsers", 15) { userMgr.getUsers().map { it.id } }
+        check(daemonUsers.contains(VIRTUAL_USER_ID)) {
+            "wipe aborted: virtual user $VIRTUAL_USER_ID missing from daemon after " +
+                "createUser (daemon users=$daemonUsers) — every uninstall would silently no-op"
         }
-        trace("phase=ensure-user: user record verified present")
+        trace("phase=ensure-user: user record verified present in daemon")
 
-        trace("phase=collect")
+        // 1. Collect package names. Disk FIRST (host-local, no IPC, cannot
+        //    hang), then the daemon's list as a supplement (a registered-
+        //    but-dir-less package still deserves an uninstall attempt).
+        //    Each source gets start/end trace lines so a stall is
+        //    attributable to the exact call.
+        trace("phase=collect: disk scan start")
         val pkgs = mutableSetOf<String>()
-        runCatching { installedGuestPackages() }.onSuccess { pkgs += it }
         runCatching {
             BEnvironment.getAppRootDir()
                 .listFiles { f -> f.isDirectory }
                 ?.forEach { pkgs += it.name }
-        }
-        // Diagnostic: how many packages does the engine think exist at all?
-        // If this is 0 while pkgs is non-empty (from disk), the engine lost
-        // its in-memory state (e.g. bad re-init) and uninstalls will no-op.
-        val enginePkgCount = runCatching {
-            BPackageManagerService.get().getBPackageSettings().size
-        }.getOrDefault(-1)
-        trace("phase=collect: pkgs=${pkgs.size} [${pkgs.joinToString(",")}] " +
-            "enginePackages=$enginePkgCount")
+        }.onFailure { trace("phase=collect: disk scan threw: ${it.message}") }
+        trace("phase=collect: disk scan end, pkgs=${pkgs.size}")
+        trace("phase=collect: daemon list start")
+        runCatching {
+            ipc("getInstalledPackages", 20) {
+                core().getInstalledPackages(0, VIRTUAL_USER_ID).map { it.packageName }
+            }
+        }.onSuccess { pkgs += it }
+            .onFailure {
+                trace("phase=collect: daemon list FAILED (${it.message}); " +
+                    "continuing with disk set only")
+            }
+        trace("phase=collect: end, pkgs=${pkgs.size} [${pkgs.sorted().joinToString(",")}]")
 
-        // 1. Stop running guests so open files don't block deletion.
+        // 2. Stop running guests so open files don't block deletion.
+        //    Best effort per package, but a TIMEOUT means the daemon is
+        //    wedged: fail fast instead of burning one timeout per package
+        //    (the sweep's retry re-kills before its second pass anyway).
         trace("phase=stop pkgs=${pkgs.size}")
         for (pkg in pkgs) {
-            runCatching { core().stopPackage(pkg, VIRTUAL_USER_ID) }
+            try {
+                ipc("stopPackage", 10) { core().stopPackage(pkg, VIRTUAL_USER_ID) }
+            } catch (e: IpcTimeoutException) {
+                throw e
+            } catch (e: Exception) {
+                trace("stop $pkg FAILED: ${e.message}")
+            }
         }
+        trace("phase=stop: end")
 
-        // 2. Isolated per-package uninstall while user 0 exists, each
-        //    VERIFIED IMMEDIATELY. If the engine silently skips one (stale
-        //    state, XPOSED flag, whatever), we fail here naming the package
-        //    instead of discovering it at the end (or never).
+        // 3. Isolated per-package uninstall while user 0 exists. A failed
+        //    IPC aborts loudly (the daemon is not cooperating; further
+        //    calls would just burn timeouts). Silent no-ops (service
+        //    returns early for missing/XPOSED packages) are caught by the
+        //    end-of-wipe verification, which names survivors.
         trace("phase=uninstall-all count=${pkgs.size}")
         for (pkg in pkgs) {
             trace("uninstalling $pkg")
-            runCatching { core().uninstallPackageAsUser(pkg, VIRTUAL_USER_ID) }
-                .onFailure { trace("uninstall $pkg threw: ${it.message}") }
-            check(!isInstalledDirect(pkg)) {
-                "wipe aborted: uninstall of $pkg had no effect — still " +
-                    "registered for user $VIRTUAL_USER_ID"
+            ipc("uninstallPackageAsUser", 25) {
+                core().uninstallPackageAsUser(pkg, VIRTUAL_USER_ID)
             }
-            trace("uninstalled $pkg (verified gone)")
+            trace("uninstall $pkg: daemon call returned")
         }
+        trace("phase=uninstall-all: end")
 
-        // 3. GMS via the engine's own uninstaller, verified directly.
-        trace("phase=uninstall-gms")
-        runCatching { core().uninstallGms(VIRTUAL_USER_ID) }
-            .onFailure { trace("phase=uninstall-gms threw: ${it.message}") }
-        val gmsGone = runCatching { !GmsCore.isInstalledGoogleService(VIRTUAL_USER_ID) }
-            .getOrDefault(false)
+        // 4. GMS via the engine's own uninstaller, verified through the
+        //    proxy (a timed-out/failed check is INCONCLUSIVE -> abort, not
+        //    a pass: the proxy swallows RemoteException as "not installed").
+        trace("phase=uninstall-gms: start")
+        ipc("uninstallGms", 60) { core().uninstallGms(VIRTUAL_USER_ID) }
+        trace("phase=uninstall-gms: uninstaller returned")
+        val gmsGone = ipc("isInstalledGoogleService", 15) {
+            !GmsCore.isInstalledGoogleService(VIRTUAL_USER_ID)
+        }
         check(gmsGone) { "wipe aborted: GMS still installed after uninstallGms" }
         trace("phase=uninstall-gms: verified gone")
 
-        // 4. NOTE: we deliberately do NOT call the engine's deleteUser here.
+        // 5. NOTE: we deliberately do NOT call the engine's deleteUser here.
         //    BUserManagerService.deleteUser holds mUserLock+mUsers while
         //    calling into BPackageManagerService.deleteUser (lock-order
         //    inversion -> potential deadlock), and its internal package loop
         //    removes entries from the ArrayMap it iterates (silently skipping
-        //    packages). It is also redundant: step 2/3 removed every package,
-        //    step 5 clears every data dir, and step 6 re-creates the user
-        //    record. The user record itself (id + status) carries no package
-        //    state, so there is nothing left for deleteUser to clean.
+        //    packages). It is also redundant: steps 3/4 removed every
+        //    package, step 6 clears every data dir. The user record itself
+        //    (id + status) carries no package state, so there is nothing
+        //    left for deleteUser to clean.
         trace("phase=engine-delete-user: SKIPPED (redundant and unsafe; see note)")
 
-        // 5. Scorched earth: force-remove every on-disk location that can
+        // 6. Scorched earth: force-remove every on-disk location that can
         //    hold user-0 state. Survivors get one retry after a re-kill;
         //    anything still standing fails loudly.
         val dirs = mutableListOf(
@@ -381,7 +474,7 @@ class BlackBoxRuntime : SandboxRuntime {
         if (dirSurvivors.isNotEmpty()) {
             trace("phase=sweep-retry survivors=${dirSurvivors.size}")
             for (pkg in pkgs) {
-                runCatching { core().stopPackage(pkg, VIRTUAL_USER_ID) }
+                runCatching { ipc("stopPackage", 10) { core().stopPackage(pkg, VIRTUAL_USER_ID) } }
             }
             val retry = dirSurvivors.toList()
             dirSurvivors.clear()
@@ -394,30 +487,44 @@ class BlackBoxRuntime : SandboxRuntime {
         }
         trace("phase=sweep-dirs: all clear")
 
-        // 6. Re-create the user record and VERIFY it exists before the final
-        //    check — the engine's queries false-pass when the user is absent.
-        trace("phase=verify-user: re-creating user $VIRTUAL_USER_ID")
-        runCatching { users().createUser(VIRTUAL_USER_ID) }
-            .onFailure { trace("phase=verify-user: createUser threw: ${it.message}") }
-        check(userExists()) {
-            "wipe aborted: virtual user $VIRTUAL_USER_ID missing before " +
-                "verification — checks would be meaningless"
+        // 7. Final verification. Trust chain, in order:
+        //    (a) the daemon must ANSWER a Binder ping — the proxies swallow
+        //        RemoteException as empty/false, so an unresponsive daemon
+        //        would otherwise false-pass every check below as "clean".
+        //        Inconclusive here aborts instead of passing.
+        //    (b) the daemon's package list for user 0 must be empty;
+        //    (c) GMS must be gone;
+        //    (d) every wiped dir must be gone from disk (host-local truth,
+        //        no IPC involved to fake it).
+        //    The user record is NOT re-created: deleteUser was skipped, so
+        //    user 0 (verified in phase 0) still exists in the daemon.
+        trace("phase=verify: daemon ping start")
+        val daemonAlive = ipc("daemon-ping", 10) {
+            val svc = BPackageManager.get().service
+            svc != null && svc.asBinder().pingBinder()
         }
-
-        // 7. Final verification through direct service queries (no proxies):
-        //    every collected package must be gone, GMS must be gone.
-        trace("phase=verify")
-        val stillRegistered = pkgs.filter { isInstalledDirect(it) }
-        val gmsLeft = runCatching { GmsCore.isInstalledGoogleService(VIRTUAL_USER_ID) }
-            .getOrDefault(false)
-        trace("verify: stillRegistered=${stillRegistered.size} gmsLeft=$gmsLeft")
-        check(stillRegistered.isEmpty() && !gmsLeft) {
+        check(daemonAlive) {
+            "wipe aborted: engine daemon not responding to ping — " +
+                "verification inconclusive, refusing to report clean"
+        }
+        trace("phase=verify: daemon alive; package list start")
+        val stillRegistered = ipc("verify-list", 20) {
+            core().getInstalledPackages(0, VIRTUAL_USER_ID).map { it.packageName }.sorted()
+        }
+        trace("phase=verify: list end, stillRegistered=${stillRegistered.size}")
+        val gmsLeft = ipc("verify-gms", 15) { GmsCore.isInstalledGoogleService(VIRTUAL_USER_ID) }
+        val dirsLeft = dirs.filter { it.exists() }.map { it.absolutePath }
+        trace("phase=verify: gmsLeft=$gmsLeft dirsLeft=${dirsLeft.size}")
+        check(stillRegistered.isEmpty() && !gmsLeft && dirsLeft.isEmpty()) {
             buildString {
                 append("identity wipe incomplete")
                 if (stillRegistered.isNotEmpty()) {
                     append("; still registered: ${stillRegistered.joinToString(",")}")
                 }
                 if (gmsLeft) append("; GMS still registered")
+                if (dirsLeft.isNotEmpty()) {
+                    append("; dirs survived: ${dirsLeft.joinToString(",")}")
+                }
             }.toString()
         }
         trace("wipe complete")

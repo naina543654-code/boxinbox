@@ -61,7 +61,8 @@ s_link() {  # aapt2: engine res + appcompat res -> base.apk + R.java + R.txt
   "$BT/aapt2" compile --dir "$ERES_TMP/res" -o "$MB/engine-res.zip"
   "$BT/aapt2" compile --dir "$AC_TMP/res" -o "$MB/appcompat-res.zip"
   "$BT/aapt2" compile --dir "$ENGINE/manual-build/attr-workaround" -o "$MB/fixattr.zip"
-  ( cd "$MB/flat" && unzip -q -o ../engine-res.zip && unzip -q -o ../appcompat-res.zip && unzip -q -o ../fixattr.zip )
+  "$BT/aapt2" compile --dir "$WS/res" -o "$MB/host-res.zip"
+  ( cd "$MB/flat" && unzip -q -o ../engine-res.zip && unzip -q -o ../appcompat-res.zip && unzip -q -o ../fixattr.zip && unzip -q -o ../host-res.zip )
   "$BT/aapt2" link -o "$MB/base.apk" \
     -I "$AJAR" \
     --manifest "$MB/AndroidManifest-merged.xml" \
