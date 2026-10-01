@@ -124,7 +124,7 @@ s_javac() {  # compile all engine java (1.8) -> engine-classes.jar
        "$ENGINE/Bcore/pine-xposed/src/main/java" \
        "$ENGINE/Bcore/pine-xposed/src/main/apacheCommonsLang" \
        "$ENGINE/android-mirror/src/main/java" \
-       "$WORK/aidl-gen" \
+       "$WORK/aidl-gen" "$WORK/gen-r" \
        -name "*.java" > "$WORK/sources.list"
   wc -l "$WORK/sources.list"
   CP="$A30:$DEPS/core-1.1.2.jar:$DEPS/freereflection-classes.jar:$DEPS/annotation-1.1.0.jar:$DEPS/androidx-core-classes.jar"
@@ -135,6 +135,12 @@ s_javac() {  # compile all engine java (1.8) -> engine-classes.jar
     -d "$WORK/classes" @"$WORK/sources.list" 2>"$WORK/javac.log" || {
       echo "javac FAILED (no silent fallback — black.* impls require the processor)"; tail -25 "$WORK/javac.log"; return 1;
     }
+  # Strip the aapt2-generated R classes: a standard AGP-built AAR never ships them —
+  # the consuming app build regenerates top.niunaijun.blackbox.R from R.txt + res/.
+  # (LauncherActivity references R at compile time, hence gen-r stays on the sources.)
+  # Shipping them broke Gradle's AarToClassTransform:
+  #   "already contains entry 'top/niunaijun/blackbox/R$anim.class', cannot overwrite"
+  find "$WORK/classes/top/niunaijun/blackbox" -maxdepth 1 -name 'R*.class' -delete
   cd "$WORK/classes" && find . -name "*.class" > "$WORK/classes.list"
   "$JH/bin/jar" cf "$WORK/engine-classes.jar" @"$WORK/classes.list"
   cd - > /dev/null

@@ -52,7 +52,14 @@ public class DaemonService extends Service {
     }
 
     private void showNotification() {
+        // FIX (2026-10-01): the builder previously set no small icon. On Android 8.0+
+        // startForeground() with an iconless notification throws
+        // RemoteServiceException$CannotPostForegroundServiceNotificationException
+        // ("Bad notification for startForeground"), killing the :black daemon process.
         NotificationCompat.Builder builder = new NotificationCompat.Builder(getApplicationContext(), getPackageName() + ".blackbox_core")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("Privacy Sandbox")
+                .setContentText("Sandbox runtime is active")
                 .setPriority(NotificationCompat.PRIORITY_MAX);
         startForeground(NOTIFY_ID, builder.build());
     }
