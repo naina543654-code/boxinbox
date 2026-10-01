@@ -18,6 +18,7 @@ import top.niunaijun.blackbox.fake.frameworks.BLocationManager;
 import top.niunaijun.blackbox.fake.hook.BinderInvocationStub;
 import top.niunaijun.blackbox.fake.hook.MethodHook;
 import top.niunaijun.blackbox.fake.hook.ProxyMethod;
+import top.niunaijun.blackbox.fake.hook.ProxyMethods;
 import top.niunaijun.blackbox.fake.spoof.BSpoofManager;
 import top.niunaijun.blackbox.utils.Md5Utils;
 
@@ -179,7 +180,15 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         }
     }
 
-    @ProxyMethod("getNetworkOperator")
+    /**
+     * Track B: operator numeric (MCC+MNC) from the spoof profile when active.
+     * Covers both the legacy AIDL name (pre-API 30) and the ForPhone variant
+     * (API 30+): the proxy matches hooks by interface method name, and on
+     * API 30+ TelephonyManager.getNetworkOperator() calls
+     * getNetworkOperatorForPhone, so the legacy-only hook silently never fired.
+     * Inactive profile -> pass through to the real implementation.
+     */
+    @ProxyMethods({"getNetworkOperator", "getNetworkOperatorForPhone"})
     public static class GetNetworkOperator extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
@@ -196,8 +205,12 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
      * Track B: operator / SIM / country identity overrides from the spoof profile.
      * Inactive profile -> pass through to the real implementation (unchanged engine
      * behavior for these getters).
+     *
+     * <p>Each hook registers both the legacy AIDL name and the API 30+
+     * ForPhone/ForSubscriber variant: see {@link #GetNetworkOperator} for why.
+     * Variant names that do not exist on the device's ITelephony are inert.
      */
-    @ProxyMethod("getNetworkOperatorName")
+    @ProxyMethods({"getNetworkOperatorName", "getNetworkOperatorNameForPhone"})
     public static class GetNetworkOperatorName extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
@@ -209,7 +222,7 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         }
     }
 
-    @ProxyMethod("getSimOperator")
+    @ProxyMethods({"getSimOperator", "getSimOperatorForPhone"})
     public static class GetSimOperator extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
@@ -221,7 +234,7 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         }
     }
 
-    @ProxyMethod("getSimOperatorName")
+    @ProxyMethods({"getSimOperatorName", "getSimOperatorNameForPhone"})
     public static class GetSimOperatorName extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
@@ -233,7 +246,7 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         }
     }
 
-    @ProxyMethod("getSimCountryIso")
+    @ProxyMethods({"getSimCountryIso", "getSimCountryIsoForPhone"})
     public static class GetSimCountryIso extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
@@ -245,7 +258,7 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         }
     }
 
-    @ProxyMethod("getNetworkCountryIso")
+    @ProxyMethods({"getNetworkCountryIso", "getNetworkCountryIsoForPhone"})
     public static class GetNetworkCountryIso extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
@@ -257,14 +270,41 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         }
     }
 
-    @ProxyMethod("getNetworkTypeForSubscriber")
-    public static class GetNetworkTypeForSubscriber extends MethodHook {
+    /**
+     * Track B: data/voice network type. On API 24+ TelephonyManager
+     * getDataNetworkType() calls ITelephony.getDataNetworkTypeForSubscriber,
+     * which had no hook at all, so the guest always saw the real type.
+     * Spoofed value is LTE (the most common type); a spoof profile could make
+     * this per-identity later. Inactive profile -> pass through.
+     */
+    @ProxyMethods({"getDataNetworkType", "getDataNetworkTypeForSubscriber"})
+    public static class GetDataNetworkType extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            BSpoofManager spoof = BSpoofManager.get();
+            if (spoof.isSpoofActive()) {
+                return TelephonyManager.NETWORK_TYPE_LTE;
+            }
             try {
                 return method.invoke(who, args);
             } catch (Throwable e) {
-                return 0;
+                return TelephonyManager.NETWORK_TYPE_UNKNOWN;
+            }
+        }
+    }
+
+    @ProxyMethods({"getNetworkType", "getVoiceNetworkTypeForSubscriber"})
+    public static class GetVoiceNetworkType extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            BSpoofManager spoof = BSpoofManager.get();
+            if (spoof.isSpoofActive()) {
+                return TelephonyManager.NETWORK_TYPE_LTE;
+            }
+            try {
+                return method.invoke(who, args);
+            } catch (Throwable e) {
+                return TelephonyManager.NETWORK_TYPE_UNKNOWN;
             }
         }
     }
