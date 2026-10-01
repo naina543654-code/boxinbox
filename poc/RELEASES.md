@@ -25,7 +25,8 @@ see `poc/SPOOFING_MATRIX.md` for the verification matrix.
   symlink-safe deletion, inconclusive-abort when the daemon is unresponsive.
   Trace: `filesDir/wipe-trace.log`, logcat tag `BoxInBoxWipe`. Also repaired
   two latent manual-build breakages (merge-manifest.py package attr; host
-  res/ now compiled) — first successful local APK build.
+  res/ now compiled) — first successful local APK build. VERIFIED on-device
+  2026-10-02: Reset and Delete both work.
 - `89edc0b` — Spoof expansion: `Build.DISPLAY` (OEM-coherent derivation),
   `VERSION.INCREMENTAL` (from fingerprint), `VERSION.SECURITY_PATCH`
   (researched per row; skipped when unknown), sensor `getVendor()`/`getName()`
