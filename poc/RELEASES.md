@@ -35,6 +35,23 @@ see `poc/SPOOFING_MATRIX.md` for the verification matrix.
 - `df159ed` — Hotfix: `KERNEL_RE` rejected every generated kernel
   (`-4-00001` has two numeric segments); identity generation was broken.
   Regex widened; host APK rebuilt.
+- `UNRELEASED-BATCH` — OS-identity leak closure (this commit): extended `Build`
+  fields `TIME` (patch-date-derived), `USER`/`HOST` (`android-build`/`abfarm`),
+  `BOOTLOADER`/`RADIO` (`unknown`), `SOC_MANUFACTURER`/`SOC_MODEL` (only
+  verified hardware mappings; unknown hardware → skipped, never fabricated);
+  fixed `VERSION.CODENAME`/`BASE_OS`/`PREVIEW_SDK_INT` release constants;
+  per-identity ICCID (19-digit `89…`) + `getSimSerialNumber()` binder hook;
+  cell privacy (empty `getAllCellInfo()`, null `getCellLocation()`, empty
+  `getNeighboringCellInfo()`); empty `getScanResults()`; Pine hooks for
+  `TimeZone.getDefault()`/`Locale.getDefault()` (country-coherent with the GPS
+  city), Bluetooth name (spoofed model) / address (per-identity `02:` MAC),
+  `NetworkInterface.getHardwareAddress()` on `wlan0` only, and
+  `WebSettings.getDefaultUserAgent()` (prebuilt UA with spoofed model/build
+  ID). Network values vary per identity (fresh MACs + ICCID each generate).
+  ProbeV2 gained rows for every new spoof + cell/Wi-Fi privacy assertions.
+  Camera characteristics assessed: Unsupported (no public constructor;
+  per-device HAL specs unresearched) — documented gap.
+  All three binaries rebuilt locally and verified in-dex. UNVERIFIED on-device.
 
 ## `poc-v2.2` — `15b015b` (2026-10-01)
 

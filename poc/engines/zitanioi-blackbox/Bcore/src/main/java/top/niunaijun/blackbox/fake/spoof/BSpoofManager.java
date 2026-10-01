@@ -78,6 +78,19 @@ public class BSpoofManager {
             {"BOARD", "board"},
             {"HARDWARE", "hardware"},
             {"DISPLAY", "displayId"},
+            {"USER", "buildUser"},
+            {"HOST", "buildHost"},
+            {"BOOTLOADER", "bootloader"},
+            {"RADIO", "radio"},
+            // SoC fields are only patched when the profile carries a verified
+            // value ("" for unknown hardware -> skipped in parse()).
+            {"SOC_MANUFACTURER", "socManufacturer"},
+            {"SOC_MODEL", "socModel"},
+    };
+
+    /** android.os.Build long static field name -> profile device key. */
+    private static final String[][] BUILD_LONG_FIELD_MAP = {
+            {"TIME", "buildTime"},
     };
 
     /** android.os.Build.VERSION static field name -> profile device key. */
@@ -103,9 +116,15 @@ public class BSpoofManager {
     private boolean mSpoofActive;
 
     private final Map<String, String> mBuildFields = new HashMap<>();
+    private final Map<String, Long> mBuildLongFields = new HashMap<>();
     private final Map<String, String> mVersionFields = new HashMap<>();
     private String mAndroidId;
     private String mKernelVersion;
+
+    /** Fixed Build.VERSION identity constants for release builds. */
+    private static final String VERSION_CODENAME = "REL";
+    private static final String VERSION_BASE_OS = "";
+    private static final int VERSION_PREVIEW_SDK_INT = 0;
 
     private double mLatitude;
     private double mLongitude;
@@ -120,6 +139,8 @@ public class BSpoofManager {
 
     private String mSsid;
     private String mBssid;
+    private String mWifiMac;
+    private String mBluetoothMac;
 
     private String mOperatorName;
     private String mOperatorNumeric;
@@ -127,6 +148,11 @@ public class BSpoofManager {
     private String mTelephonyDeviceId;
     private String mSubscriberId;
     private int mNetworkType = 13; // TelephonyManager.NETWORK_TYPE_LTE
+    private String mSimSerial;
+
+    private String mTimezoneId;
+    private String mLocaleTag;
+    private String mWebViewUa;
 
     public static BSpoofManager get() {
         return sInstance;
@@ -143,7 +169,8 @@ public class BSpoofManager {
     /**
      * Returns the profile value for an android.os.Build static field name
      * (MANUFACTURER, BRAND, MODEL, DEVICE, PRODUCT, FINGERPRINT, ID, TAGS,
-     * TYPE, BOARD, HARDWARE, DISPLAY), or null when spoofing is inactive /
+     * TYPE, BOARD, HARDWARE, DISPLAY, USER, HOST, BOOTLOADER, RADIO,
+     * SOC_MANUFACTURER, SOC_MODEL), or null when spoofing is inactive /
      * the field is absent.
      */
     public String getBuildField(String name) {
@@ -254,6 +281,36 @@ public class BSpoofManager {
         return mSpoofActive ? mBssid : null;
     }
 
+    /** Per-identity wlan0 MAC for NetworkInterface.getHardwareAddress("wlan0"). */
+    public String getWifiMac() {
+        ensureLoaded();
+        return mSpoofActive ? mWifiMac : null;
+    }
+
+    /** Per-identity MAC for BluetoothAdapter.getAddress(). */
+    public String getBluetoothMac() {
+        ensureLoaded();
+        return mSpoofActive ? mBluetoothMac : null;
+    }
+
+    /** IANA timezone ID for TimeZone.getDefault(), coherent with the GPS city. */
+    public String getTimezoneId() {
+        ensureLoaded();
+        return mSpoofActive ? mTimezoneId : null;
+    }
+
+    /** BCP-47 locale tag for Locale.getDefault(), coherent with the country. */
+    public String getLocaleTag() {
+        ensureLoaded();
+        return mSpoofActive ? mLocaleTag : null;
+    }
+
+    /** Prebuilt WebView default user-agent (spoofed model/build ID baked in). */
+    public String getWebViewUa() {
+        ensureLoaded();
+        return mSpoofActive ? mWebViewUa : null;
+    }
+
     public String getOperatorName() {
         ensureLoaded();
         return mSpoofActive ? mOperatorName : null;
@@ -277,6 +334,12 @@ public class BSpoofManager {
     public String getSubscriberId() {
         ensureLoaded();
         return mSpoofActive ? mSubscriberId : null;
+    }
+
+    /** Per-identity ICCID for TelephonyManager.getSimSerialNumber(). */
+    public String getSimSerial() {
+        ensureLoaded();
+        return mSpoofActive ? mSimSerial : null;
     }
 
     /**
@@ -310,11 +373,21 @@ public class BSpoofManager {
         for (Map.Entry<String, String> entry : mBuildFields.entrySet()) {
             setBuildStaticField(Build.class, entry.getKey(), entry.getValue());
         }
+        for (Map.Entry<String, Long> entry : mBuildLongFields.entrySet()) {
+            setBuildStaticLongField(Build.class, entry.getKey(), entry.getValue());
+        }
         for (Map.Entry<String, String> entry : mVersionFields.entrySet()) {
             setBuildStaticField(Build.VERSION.class, entry.getKey(), entry.getValue());
         }
+        // Fixed release-build identity constants. CODENAME/BASE_OS/
+        // PREVIEW_SDK_INT are the same on every real release build, so they
+        // are constants rather than profile fields.
+        setBuildStaticField(Build.VERSION.class, "CODENAME", VERSION_CODENAME);
+        setBuildStaticField(Build.VERSION.class, "BASE_OS", VERSION_BASE_OS);
+        setBuildStaticIntField(Build.VERSION.class, "PREVIEW_SDK_INT", VERSION_PREVIEW_SDK_INT);
         Slog.d(TAG, "applyBuildSpoofing: patched " + mBuildFields.size()
-                + " Build fields + " + mVersionFields.size() + " Build.VERSION fields");
+                + " Build fields + " + mBuildLongFields.size() + " long Build fields + "
+                + mVersionFields.size() + " Build.VERSION fields");
     }
 
     private void setBuildStaticField(Class<?> clazz, String fieldName, String value) {
@@ -331,6 +404,28 @@ public class BSpoofManager {
             // sufficient on ART for these non-constant static finals (they are
             // assigned via getString() in <clinit>, not compile-time constants).
             field.set(null, value);
+        } catch (Throwable t) {
+            Slog.w(TAG, "applyBuildSpoofing: failed to patch " + clazz.getSimpleName()
+                    + "." + fieldName, t);
+        }
+    }
+
+    private void setBuildStaticLongField(Class<?> clazz, String fieldName, long value) {
+        try {
+            Field field = clazz.getDeclaredField(fieldName);
+            field.setAccessible(true);
+            field.setLong(null, value);
+        } catch (Throwable t) {
+            Slog.w(TAG, "applyBuildSpoofing: failed to patch " + clazz.getSimpleName()
+                    + "." + fieldName, t);
+        }
+    }
+
+    private void setBuildStaticIntField(Class<?> clazz, String fieldName, int value) {
+        try {
+            Field field = clazz.getDeclaredField(fieldName);
+            field.setAccessible(true);
+            field.setInt(null, value);
         } catch (Throwable t) {
             Slog.w(TAG, "applyBuildSpoofing: failed to patch " + clazz.getSimpleName()
                     + "." + fieldName, t);
@@ -387,8 +482,16 @@ public class BSpoofManager {
         if (device != null) {
             for (String[] mapping : BUILD_FIELD_MAP) {
                 String value = device.optString(mapping[1], null);
-                if (value != null) {
+                // Empty values are never patched (e.g. SoC fields for device
+                // rows whose hardware has no verified SoC mapping).
+                if (value != null && !value.isEmpty()) {
                     mBuildFields.put(mapping[0], value);
+                }
+            }
+            for (String[] mapping : BUILD_LONG_FIELD_MAP) {
+                long value = device.optLong(mapping[1], 0L);
+                if (value > 0L) {
+                    mBuildLongFields.put(mapping[0], value);
                 }
             }
             for (String[] mapping : VERSION_FIELD_MAP) {
@@ -404,6 +507,10 @@ public class BSpoofManager {
             String kernel = device.optString("kernelVersion", null);
             if (kernel != null && !kernel.isEmpty()) {
                 mKernelVersion = kernel;
+            }
+            String ua = device.optString("webViewUa", null);
+            if (ua != null && !ua.isEmpty()) {
+                mWebViewUa = ua;
             }
         }
 
@@ -451,6 +558,8 @@ public class BSpoofManager {
         if (network != null) {
             mSsid = network.optString("ssid", null);
             mBssid = network.optString("bssid", null);
+            mWifiMac = network.optString("wifiMac", null);
+            mBluetoothMac = network.optString("bluetoothMac", null);
         }
 
         JSONObject telephony = root.optJSONObject("telephony");
@@ -461,6 +570,13 @@ public class BSpoofManager {
             mTelephonyDeviceId = telephony.optString("deviceId", null);
             mSubscriberId = telephony.optString("subscriberId", null);
             mNetworkType = telephony.optInt("networkType", 13);
+            mSimSerial = telephony.optString("simSerial", null);
+        }
+
+        JSONObject locale = root.optJSONObject("locale");
+        if (locale != null) {
+            mTimezoneId = locale.optString("timezoneId", null);
+            mLocaleTag = locale.optString("localeTag", null);
         }
     }
 

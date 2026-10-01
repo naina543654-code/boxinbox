@@ -5,6 +5,8 @@ import android.net.wifi.WifiInfo;
 import android.util.Log;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 
 import black.android.net.wifi.BRIWifiManagerStub;
 import black.android.net.wifi.BRWifiInfo;
@@ -43,6 +45,24 @@ public class IWifiManagerProxy extends BinderInvocationStub {
     @Override
     public boolean isBadEnv() {
         return false;
+    }
+
+    @ProxyMethod("getScanResults")
+    public static class GetScanResults extends MethodHook {
+        /**
+         * Track B: a spoofed identity must never see the host's real
+         * surrounding Wi-Fi networks — nearby BSSIDs are a strong
+         * geolocation signal. Return an empty list (no networks in range)
+         * when spoofing is active; inactive profile -> pass through.
+         */
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            if (BSpoofManager.get().isSpoofActive()) {
+                Log.d(TAG, "getScanResults: spoofed -> empty");
+                return new ArrayList<>();
+            }
+            return method.invoke(who, args);
+        }
     }
 
     @ProxyMethod("getConnectionInfo")

@@ -2,6 +2,7 @@ package com.sandboxpoc.probe;
 
 import android.Manifest;
 import android.app.Activity;
+import android.bluetooth.BluetoothAdapter;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -32,6 +33,7 @@ import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.style.ForegroundColorSpan;
 import android.util.Log;
+import android.webkit.WebSettings;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -44,14 +46,16 @@ import com.google.android.gms.common.GoogleApiAvailability;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.net.NetworkInterface;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
-import java.util.HashSet;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.TimeZone;
+import java.util.HashSet;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -694,6 +698,10 @@ public class MainActivity extends Activity {
         cmpSensorIdentity();
         cmpWifi();
         cmpTelephony();
+        cmpCellPrivacy();
+        cmpLocale();
+        cmpLinkIds();
+        cmpWebViewUa();
         cmpPackages();
         cmpTransport();
         cmpMovement();
@@ -806,6 +814,16 @@ public class MainActivity extends Activity {
         cmpString("Build.BOARD", opt(dev, "board"), Build.BOARD);
         cmpString("Build.HARDWARE", opt(dev, "hardware"), Build.HARDWARE);
         cmpString("Build.DISPLAY", opt(dev, "displayId"), Build.DISPLAY);
+        cmpString("Build.TIME", optNumber(dev, "buildTime"), String.valueOf(Build.TIME));
+        cmpString("Build.USER", opt(dev, "buildUser"), Build.USER);
+        cmpString("Build.HOST", opt(dev, "buildHost"), Build.HOST);
+        cmpString("Build.BOOTLOADER", opt(dev, "bootloader"), Build.BOOTLOADER);
+        cmpString("Build.RADIO", opt(dev, "radio"), Build.RADIO);
+        // SoC is only spoofed for rows with a verified hardware->SoC mapping;
+        // "" (unknown) -> expected=null -> UNKNOWN, never a fabricated value.
+        cmpString("Build.SOC_MANUFACTURER", opt(dev, "socManufacturer"),
+                Build.SOC_MANUFACTURER);
+        cmpString("Build.SOC_MODEL", opt(dev, "socModel"), Build.SOC_MODEL);
     }
 
     private void cmpVersionInfo(JSONObject dev) {
@@ -821,6 +839,13 @@ public class MainActivity extends Activity {
         String ePatch = opt(dev, "securityPatch");
         if ("unknown".equals(ePatch)) ePatch = null; // not spoofed for unknown rows
         cmpString("Build.VERSION.SECURITY_PATCH", ePatch, Build.VERSION.SECURITY_PATCH);
+        // Fixed release-build identity constants (same on every real release
+        // build; engine sets them unconditionally when spoofing is active).
+        cmpString("Build.VERSION.CODENAME", "REL", Build.VERSION.CODENAME);
+        // "" on every real release build; engine sets it unconditionally.
+        cmpString("Build.VERSION.BASE_OS", "", Build.VERSION.BASE_OS);
+        cmpString("Build.VERSION.PREVIEW_SDK_INT", "0",
+                String.valueOf(Build.VERSION.PREVIEW_SDK_INT));
         // JVM property spoof: System.getProperty("os.version") should report
         // the profile's plausible kernel, not the host kernel.
         String oKernel;
@@ -1029,6 +1054,7 @@ public class MainActivity extends Activity {
         String oNum = null;
         String oIso = null;
         int oNt = -1;
+        String oSim = null;
         String err = null;
         try {
             if (checkSelfPermission(Manifest.permission.READ_PHONE_STATE)
@@ -1043,6 +1069,11 @@ public class MainActivity extends Activity {
                     oNum = emptyToNull(tm.getNetworkOperator());
                     oIso = emptyToNull(tm.getNetworkCountryIso());
                     oNt = tm.getDataNetworkType();
+                    try {
+                        oSim = emptyToNull(tm.getSimSerialNumber());
+                    } catch (Exception ignored) {
+                        // ICCID unreadable on this build; row below -> UNKNOWN.
+                    }
                     if (oName == null && oNum == null && oIso == null) {
                         err = "NO_NETWORK_INFO (empty results)";
                     }
@@ -1056,6 +1087,8 @@ public class MainActivity extends Activity {
         cmpTeleField("telephony.operatorName", eName, oName, err, true);
         cmpTeleField("telephony.operatorNumeric", eNum, oNum, err, false);
         cmpTeleField("telephony.countryIso", eIso, oIso, err, true);
+        cmpTeleField("telephony.simSerial", opt(tel, "simSerial"), oSim,
+                oSim == null ? "UNREADABLE" : err, false);
         if (err != null) {
             cmpRow("telephony.networkType", eNt < 0 ? null : networkTypeName(eNt), err,
                     Cmp.UNKNOWN);
@@ -1067,9 +1100,231 @@ public class MainActivity extends Activity {
         }
     }
 
+    /**
+     * Track E: timezone/locale must be coherent with the spoofed GPS city
+     * and country — the Pine hooks rewrite TimeZone.getDefault() and
+     * Locale.getDefault() for the guest process.
+     */
+    private void cmpLocale() {
+        JSONObject lo = expectedProfile == null ? null
+                : expectedProfile.optJSONObject("locale");
+        String eTz = opt(lo, "timezoneId");
+        String eLocale = opt(lo, "localeTag");
+        String oTz;
+        try {
+            oTz = TimeZone.getDefault().getID();
+        } catch (Exception e) {
+            oTz = null;
+        }
+        String oLocale;
+        try {
+            oLocale = Locale.getDefault().toLanguageTag();
+        } catch (Exception e) {
+            oLocale = null;
+        }
+        cmpString("timezone.default", eTz, oTz);
+        cmpString("locale.default", eLocale, oLocale);
+    }
+
+    /**
+     * Track E: link-layer identifiers. wlan0's hardware address and the
+     * Bluetooth adapter address must be the per-identity MACs, and the
+     * Bluetooth name must be the spoofed model.
+     */
+    private void cmpLinkIds() {
+        JSONObject net = expectedProfile == null ? null
+                : expectedProfile.optJSONObject("network");
+        JSONObject dev = expectedProfile == null ? null
+                : expectedProfile.optJSONObject("device");
+        String eWifiMac = opt(net, "wifiMac");
+        String eBtMac = opt(net, "bluetoothMac");
+        String eBtName = opt(dev, "model");
+
+        String oWifiMac = null;
+        String wifiErr = null;
+        try {
+            NetworkInterface wlan0 = NetworkInterface.getByName("wlan0");
+            if (wlan0 == null) {
+                wifiErr = "NO_WLAN0";
+            } else {
+                byte[] mac = wlan0.getHardwareAddress();
+                if (mac == null) {
+                    wifiErr = "MAC_NULL";
+                } else {
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 0; i < mac.length; i++) {
+                        if (i > 0) sb.append(':');
+                        sb.append(String.format("%02X", mac[i]));
+                    }
+                    oWifiMac = sb.toString();
+                }
+            }
+        } catch (Exception e) {
+            wifiErr = "UNAVAILABLE(" + e.getClass().getSimpleName() + ")";
+        }
+        if (eWifiMac == null) {
+            cmpRow("net.wlan0.mac", null, oWifiMac == null ? wifiErr : oWifiMac,
+                    Cmp.UNKNOWN);
+        } else if (oWifiMac == null) {
+            cmpRow("net.wlan0.mac", eWifiMac, wifiErr, Cmp.UNKNOWN);
+        } else {
+            cmpRow("net.wlan0.mac", eWifiMac, oWifiMac,
+                    eWifiMac.equalsIgnoreCase(oWifiMac) ? Cmp.PASS : Cmp.FAIL);
+        }
+
+        String oBtName = null;
+        String oBtMac = null;
+        String btErr = null;
+        try {
+            BluetoothAdapter bt = BluetoothAdapter.getDefaultAdapter();
+            if (bt == null) {
+                btErr = "NO_BT_ADAPTER";
+            } else {
+                try {
+                    oBtName = bt.getName();
+                } catch (SecurityException se) {
+                    btErr = "PERMISSION_DENIED";
+                }
+                try {
+                    oBtMac = bt.getAddress();
+                } catch (SecurityException se) {
+                    if (btErr == null) btErr = "PERMISSION_DENIED";
+                }
+            }
+        } catch (Exception e) {
+            btErr = "UNAVAILABLE(" + e.getClass().getSimpleName() + ")";
+        }
+        cmpString("bluetooth.name", eBtName, oBtName == null ? null : oBtName);
+        if (eBtMac == null) {
+            cmpRow("bluetooth.address", null, oBtMac == null ? btErr : oBtMac,
+                    Cmp.UNKNOWN);
+        } else if (oBtMac == null) {
+            cmpRow("bluetooth.address", eBtMac, btErr, Cmp.UNKNOWN);
+        } else {
+            cmpRow("bluetooth.address", eBtMac, oBtMac,
+                    eBtMac.equalsIgnoreCase(oBtMac) ? Cmp.PASS : Cmp.FAIL);
+        }
+        if (btErr != null && oBtName == null && oBtMac == null) {
+            raw("  bluetooth note: " + btErr + " -> UNKNOWN (not a spoof failure)");
+        }
+    }
+
+    /**
+     * Privacy assertions: with an active spoof profile the guest must see
+     * NO real cell towers, NO serving-cell location, and NO real nearby
+     * Wi-Fi networks. These rows assert emptiness, not profile equality.
+     */
+    private void cmpCellPrivacy() {
+        Integer cellCount = null;
+        String cellErr = null;
+        try {
+            TelephonyManager tm =
+                    (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+            if (tm == null) {
+                cellErr = "NO_TELEPHONY_SERVICE";
+            } else {
+                try {
+                    List<?> cells = tm.getAllCellInfo();
+                    cellCount = cells == null ? -1 : cells.size();
+                } catch (SecurityException se) {
+                    cellErr = "PERMISSION_DENIED";
+                }
+            }
+        } catch (Exception e) {
+            cellErr = "UNAVAILABLE(" + e.getClass().getSimpleName() + ")";
+        }
+        if (cellErr != null) {
+            cmpRow("cell.allCellInfo.count", "0 (no real towers)", cellErr, Cmp.UNKNOWN);
+        } else {
+            cmpRow("cell.allCellInfo.count", "0 (no real towers)",
+                    String.valueOf(cellCount),
+                    Integer.valueOf(0).equals(cellCount) ? Cmp.PASS : Cmp.FAIL);
+        }
+
+        String cellLoc = "n/a";
+        String locErr = null;
+        try {
+            TelephonyManager tm =
+                    (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+            if (tm != null) {
+                try {
+                    Object cl = tm.getCellLocation();
+                    cellLoc = cl == null ? "null" : cl.getClass().getSimpleName();
+                } catch (SecurityException se) {
+                    locErr = "PERMISSION_DENIED";
+                }
+            }
+        } catch (Exception e) {
+            locErr = "UNAVAILABLE(" + e.getClass().getSimpleName() + ")";
+        }
+        if (locErr != null) {
+            cmpRow("cell.getCellLocation", "null (no leak)", locErr, Cmp.UNKNOWN);
+        } else {
+            cmpRow("cell.getCellLocation", "null (no leak)", cellLoc,
+                    "null".equals(cellLoc) ? Cmp.PASS : Cmp.FAIL);
+        }
+
+        Integer scanCount = null;
+        String scanErr = null;
+        try {
+            WifiManager wm = (WifiManager) getApplicationContext()
+                    .getSystemService(Context.WIFI_SERVICE);
+            if (wm == null) {
+                scanErr = "NO_WIFI_SERVICE";
+            } else {
+                try {
+                    List<?> scans = wm.getScanResults();
+                    scanCount = scans == null ? -1 : scans.size();
+                } catch (SecurityException se) {
+                    scanErr = "PERMISSION_DENIED";
+                }
+            }
+        } catch (Exception e) {
+            scanErr = "UNAVAILABLE(" + e.getClass().getSimpleName() + ")";
+        }
+        if (scanErr != null) {
+            cmpRow("wifi.scanResults.count", "0 (no real BSSIDs)", scanErr, Cmp.UNKNOWN);
+        } else {
+            cmpRow("wifi.scanResults.count", "0 (no real BSSIDs)",
+                    String.valueOf(scanCount),
+                    Integer.valueOf(0).equals(scanCount) ? Cmp.PASS : Cmp.FAIL);
+        }
+    }
+
+    /**
+     * Track E: the WebView default UA must carry the spoofed model/build ID,
+     * never the host's.
+     */
+    private void cmpWebViewUa() {
+        JSONObject dev = expectedProfile == null ? null
+                : expectedProfile.optJSONObject("device");
+        String eUa = opt(dev, "webViewUa");
+        String oUa;
+        try {
+            oUa = WebSettings.getDefaultUserAgent(this);
+        } catch (Exception e) {
+            oUa = null;
+        }
+        if (eUa == null) {
+            cmpRow("webview.defaultUa", null, oUa == null ? null : "(present)",
+                    Cmp.UNKNOWN);
+            return;
+        }
+        if (oUa == null) {
+            cmpRow("webview.defaultUa", "(expected ua)", null, Cmp.UNKNOWN);
+            return;
+        }
+        boolean exact = eUa.equals(oUa);
+        cmpRow("webview.defaultUa", "(model+buildId spoofed)",
+                exact ? "(exact match)" : oUa, exact ? Cmp.PASS : Cmp.FAIL);
+        if (!exact) {
+            raw("  expected UA: " + eUa);
+            raw("  observed UA: " + oUa);
+        }
+    }
+
     private void cmpTeleField(String field, String expected, String observed, String err,
-                              boolean ignoreCase) {
-        if (expected == null) {
+                              boolean ignoreCase) {        if (expected == null) {
             cmpRow(field, null, observed == null ? err : observed, Cmp.UNKNOWN);
             return;
         }

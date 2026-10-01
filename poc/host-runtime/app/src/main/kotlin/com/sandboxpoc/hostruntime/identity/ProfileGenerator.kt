@@ -7,6 +7,13 @@ import com.sandboxpoc.hostruntime.profile.SpoofProfile
 import com.sandboxpoc.hostruntime.profile.deriveDisplayId
 import com.sandboxpoc.hostruntime.profile.deriveIncremental
 import com.sandboxpoc.hostruntime.profile.kernelForApi
+import com.sandboxpoc.hostruntime.profile.deriveBuildTime
+import com.sandboxpoc.hostruntime.profile.socFor
+import com.sandboxpoc.hostruntime.profile.buildWebViewUa
+import com.sandboxpoc.hostruntime.profile.timezoneFor
+import com.sandboxpoc.hostruntime.profile.localeFor
+import com.sandboxpoc.hostruntime.profile.newLocalMac
+import com.sandboxpoc.hostruntime.profile.newSimSerial
 import java.security.SecureRandom
 import java.util.UUID
 
@@ -296,6 +303,14 @@ object ProfileGenerator {
             displayId = deriveDisplayId(row.brand, row.buildId, incremental),
             buildIncremental = incremental,
             kernelVersion = kernelForApi(row.apiLevel),
+            buildTime = deriveBuildTime(row.securityPatch),
+            buildUser = "android-build",
+            buildHost = "abfarm",
+            bootloader = "unknown",
+            radio = "unknown",
+            socManufacturer = socFor(row.hardware).first,
+            socModel = socFor(row.hardware).second,
+            webViewUa = buildWebViewUa(row.androidVersion, row.model, row.buildId),
         )
         return SpoofProfile(
             profileId = profileId,
@@ -308,6 +323,8 @@ object ProfileGenerator {
                 ssid = newSsid(),
                 bssid = newBssid(),
                 transport = "WIFI",
+                wifiMac = newLocalMac(),
+                bluetoothMac = newLocalMac(),
             ),
             telephony = SpoofProfile.TelephonyInfo(
                 operatorName = operator.name,
@@ -316,6 +333,11 @@ object ProfileGenerator {
                 deviceId = newAndroidId(),
                 subscriberId = newSubscriberId(operator.numeric.take(3)),
                 networkType = newNetworkType(),
+                simSerial = newSimSerial(),
+            ),
+            locale = SpoofProfile.LocaleInfo(
+                timezoneId = timezoneFor(city.countryIso),
+                localeTag = localeFor(city.countryIso),
             ),
         )
     }
@@ -401,10 +423,7 @@ object ProfileGenerator {
     }
 
     /** Random locally-administered BSSID per identity (02:xx:xx:xx:xx:xx). */
-    private fun newBssid(): String {
-        val bytes = ByteArray(5).also { random.nextBytes(it) }
-        return "02:" + bytes.joinToString(":") { "%02X".format(it.toInt() and 0xFF) }
-    }
+    private fun newBssid(): String = newLocalMac()
 
     /** Plausible vendor/name strings for the sensor set, per manufacturer. */
     private data class SensorVendorStrings(

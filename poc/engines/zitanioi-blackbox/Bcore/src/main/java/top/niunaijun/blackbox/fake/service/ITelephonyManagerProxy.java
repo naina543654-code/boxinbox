@@ -7,6 +7,7 @@ import android.util.Log;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.List;
 
 import black.android.os.BRServiceManager;
@@ -147,11 +148,29 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         }
     }
 
+    @ProxyMethod("getSimSerialNumber")
+    public static class GetSimSerialNumber extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            BSpoofManager spoof = BSpoofManager.get();
+            if (spoof.isSpoofActive() && spoof.getSimSerial() != null) {
+                Log.d(TAG, "getSimSerialNumber: spoofed");
+                return spoof.getSimSerial();
+            }
+            return method.invoke(who, args);
+        }
+    }
+
     @ProxyMethod("getCellLocation")
     public static class GetCellLocation extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             Log.d(TAG, "getCellLocation");
+            if (BSpoofManager.get().isSpoofActive()) {
+                // A spoofed identity must never see the host's real
+                // serving-cell location.
+                return null;
+            }
             if (BLocationManager.isFakeLocationEnable()) {
                 BCell cell = BLocationManager.get().getCell(BActivityThread.getUserId(), BActivityThread.getAppPackageName());
                 if (cell != null) {
@@ -167,6 +186,12 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
     public static class GetAllCellInfo extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            if (BSpoofManager.get().isSpoofActive()) {
+                // A spoofed identity must never see the host's real cell
+                // towers: a phone in the profile's city would not be near
+                // these masts. Return an empty list (no visible cells).
+                return new ArrayList<>();
+            }
             if (BLocationManager.isFakeLocationEnable()) {
                 List<BCell> cell = BLocationManager.get().getAllCell(BActivityThread.getUserId(), BActivityThread.getAppPackageName());
                 // TODO Transfer BCell to CdmaCellLocation/GsmCellLocation
@@ -344,6 +369,10 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             Log.d(TAG, "getNeighboringCellInfo");
+            if (BSpoofManager.get().isSpoofActive()) {
+                // Never leak the host's real neighboring cells.
+                return new ArrayList<>();
+            }
             if (BLocationManager.isFakeLocationEnable()) {
                 List<BCell> cell = BLocationManager.get().getNeighboringCell(BActivityThread.getUserId(), BActivityThread.getAppPackageName());
                 // TODO Transfer BCell to CdmaCellLocation/GsmCellLocation

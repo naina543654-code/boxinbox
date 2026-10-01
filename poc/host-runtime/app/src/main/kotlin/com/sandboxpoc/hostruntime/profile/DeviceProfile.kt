@@ -47,6 +47,142 @@ internal fun kernelForApi(apiLevel: Int): String = when (apiLevel) {
 }
 
 /**
+ * Plausible `Build.TIME` (ro.build.date.utc, seconds→ms): real factory builds
+ * are stamped within days of their security patch level. We stamp 12:00 UTC
+ * on the SPL date itself. Returns a fixed fallback for "unknown".
+ */
+internal fun deriveBuildTime(securityPatch: String): Long {
+    if (securityPatch == "unknown") return 1_700_406_720_000L // 2023-12-31T12:00Z
+    val parts = securityPatch.split('-')
+    if (parts.size != 3) return 1_700_406_720_000L
+    val y = parts[0].toIntOrNull(); val mo = parts[1].toIntOrNull(); val d = parts[2].toIntOrNull()
+    if (y == null || mo == null || d == null) return 1_700_406_720_000L
+    val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+    cal.set(y, mo - 1, d, 12, 0, 0)
+    cal.set(java.util.Calendar.MILLISECOND, 0)
+    return cal.timeInMillis
+}
+
+/**
+ * SoC (ro.soc.manufacturer / ro.soc.model) derived from the device's
+ * `hardware` string. Only rows whose hardware maps to a verified SoC are
+ * covered — unknown values return ("", "") and the engine skips the patch.
+ */
+internal fun socFor(hardware: String): Pair<String, String> = when (hardware) {
+    "s5e9925" -> "Samsung" to "Exynos 2400"
+    "s5e8835" -> "Samsung" to "Exynos 1480"
+    "s5e8825", "exynos1380" -> "Samsung" to "Exynos 1380"
+    "exynos1280" -> "Samsung" to "Exynos 1280"
+    "lahaina" -> "Qualcomm" to "Snapdragon 888"
+    "atoll" -> "Qualcomm" to "Snapdragon 720G"
+    "mt6877" -> "MediaTek" to "Dimensity 900"
+    "raven", "oriole", "bluejay" -> "Google" to "Tensor"
+    "panther", "cheetah", "lynx", "felix" -> "Google" to "Tensor G2"
+    else -> "" to ""
+}
+
+/**
+ * Prebuilt WebView default user-agent. Model and build ID come from the
+ * spoofed profile, so the UA never contains the host's real model/build.
+ * The engine returns this string verbatim for
+ * `WebSettings.getDefaultUserAgent`.
+ */
+internal fun buildWebViewUa(androidVersion: String, model: String, buildId: String): String =
+    "Mozilla/5.0 (Linux; Android $androidVersion; $model Build/$buildId) " +
+        "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 " +
+        "Chrome/126.0.0.0 Mobile Safari/537.36"
+
+/**
+ * IANA timezone for a profile country (primary zone; the per-identity city
+ * sits inside it, so TZ, locale and GPS stay coherent).
+ */
+internal fun timezoneFor(countryIso: String): String = COUNTRY_LOCALE[countryIso]?.first ?: "UTC"
+
+/** BCP-47 locale tag for a profile country. */
+internal fun localeFor(countryIso: String): String = COUNTRY_LOCALE[countryIso]?.second ?: "en-US"
+
+private val COUNTRY_LOCALE: Map<String, Pair<String, String>> = mapOf(
+    "us" to ("America/New_York" to "en-US"),
+    "ca" to ("America/Toronto" to "en-CA"),
+    "mx" to ("America/Mexico_City" to "es-MX"),
+    "br" to ("America/Sao_Paulo" to "pt-BR"),
+    "ar" to ("America/Argentina/Buenos_Aires" to "es-AR"),
+    "cl" to ("America/Santiago" to "es-CL"),
+    "co" to ("America/Bogota" to "es-CO"),
+    "pe" to ("America/Lima" to "es-PE"),
+    "gb" to ("Europe/London" to "en-GB"),
+    "ie" to ("Europe/Dublin" to "en-IE"),
+    "fr" to ("Europe/Paris" to "fr-FR"),
+    "de" to ("Europe/Berlin" to "de-DE"),
+    "es" to ("Europe/Madrid" to "es-ES"),
+    "it" to ("Europe/Rome" to "it-IT"),
+    "pt" to ("Europe/Lisbon" to "pt-PT"),
+    "nl" to ("Europe/Amsterdam" to "nl-NL"),
+    "be" to ("Europe/Brussels" to "nl-BE"),
+    "ch" to ("Europe/Zurich" to "de-CH"),
+    "at" to ("Europe/Vienna" to "de-AT"),
+    "se" to ("Europe/Stockholm" to "sv-SE"),
+    "no" to ("Europe/Oslo" to "nb-NO"),
+    "dk" to ("Europe/Copenhagen" to "da-DK"),
+    "fi" to ("Europe/Helsinki" to "fi-FI"),
+    "pl" to ("Europe/Warsaw" to "pl-PL"),
+    "cz" to ("Europe/Prague" to "cs-CZ"),
+    "hu" to ("Europe/Budapest" to "hu-HU"),
+    "ro" to ("Europe/Bucharest" to "ro-RO"),
+    "gr" to ("Europe/Athens" to "el-GR"),
+    "ua" to ("Europe/Kyiv" to "uk-UA"),
+    "tr" to ("Europe/Istanbul" to "tr-TR"),
+    "ae" to ("Asia/Dubai" to "ar-AE"),
+    "sa" to ("Asia/Riyadh" to "ar-SA"),
+    "qa" to ("Asia/Qatar" to "ar-QA"),
+    "il" to ("Asia/Jerusalem" to "he-IL"),
+    "eg" to ("Africa/Cairo" to "ar-EG"),
+    "ma" to ("Africa/Casablanca" to "ar-MA"),
+    "ng" to ("Africa/Lagos" to "en-NG"),
+    "ke" to ("Africa/Nairobi" to "en-KE"),
+    "gh" to ("Africa/Accra" to "en-GH"),
+    "za" to ("Africa/Johannesburg" to "en-ZA"),
+    "in" to ("Asia/Kolkata" to "en-IN"),
+    "pk" to ("Asia/Karachi" to "ur-PK"),
+    "bd" to ("Asia/Dhaka" to "bn-BD"),
+    "lk" to ("Asia/Colombo" to "si-LK"),
+    "np" to ("Asia/Kathmandu" to "ne-NP"),
+    "sg" to ("Asia/Singapore" to "en-SG"),
+    "my" to ("Asia/Kuala_Lumpur" to "ms-MY"),
+    "th" to ("Asia/Bangkok" to "th-TH"),
+    "id" to ("Asia/Jakarta" to "id-ID"),
+    "ph" to ("Asia/Manila" to "fil-PH"),
+    "vn" to ("Asia/Ho_Chi_Minh" to "vi-VN"),
+    "kh" to ("Asia/Phnom_Penh" to "km-KH"),
+    "jp" to ("Asia/Tokyo" to "ja-JP"),
+    "kr" to ("Asia/Seoul" to "ko-KR"),
+    "cn" to ("Asia/Shanghai" to "zh-CN"),
+    "hk" to ("Asia/Hong_Kong" to "zh-HK"),
+    "tw" to ("Asia/Taipei" to "zh-TW"),
+    "au" to ("Australia/Sydney" to "en-AU"),
+    "nz" to ("Pacific/Auckland" to "en-NZ"),
+)
+
+/**
+ * Random locally-administered unicast MAC (`02:xx:…`), the same shape as
+ * [ProfileGenerator.newBssid] but without the stored-SSID coupling.
+ */
+internal fun newLocalMac(): String {
+    val r = java.security.SecureRandom()
+    val b = ByteArray(6); r.nextBytes(b)
+    b[0] = (b[0].toInt() and 0xFE or 0x02).toByte()
+    return b.joinToString(":") { "%02X".format(it) }
+}
+
+/** Random ICCID: 19 digits starting with 89 (telecom industry issuer). */
+internal fun newSimSerial(): String {
+    val r = java.security.SecureRandom()
+    val sb = StringBuilder("89")
+    repeat(17) { sb.append(r.nextInt(10)) }
+    return sb.toString()
+}
+
+/**
  * Spoofed device profile for one virtual identity. `extras` is an extensible
  * map for future engine-specific fields (serial, IMEI-shaped values, MAC,
  * telephony props, …). The core fields mirror android.os.Build so an engine
@@ -996,6 +1132,7 @@ data class SpoofProfile(
     val sensors: List<SensorInfo>,
     val network: NetworkInfo,
     val telephony: TelephonyInfo,
+    val locale: LocaleInfo,
 ) {
     data class DeviceInfo(
         val manufacturer: String,
@@ -1018,6 +1155,22 @@ data class SpoofProfile(
         val buildIncremental: String,
         /** Plausible kernel for `System.getProperty("os.version")`. */
         val kernelVersion: String,
+        /** Build.TIME — derived from the security-patch date (builds ship around their SPL). */
+        val buildTime: Long,
+        /** Build.USER — constant "android-build", as on real factory builds. */
+        val buildUser: String,
+        /** Build.HOST — constant "abfarm", as on real factory builds. */
+        val buildHost: String,
+        /** Build.BOOTLOADER — "unknown" (what most retail devices report here). */
+        val bootloader: String,
+        /** Build.RADIO — "unknown" (ditto). */
+        val radio: String,
+        /** Build.SOC_MANUFACTURER — derived from the hardware string; "" = unknown, not patched. */
+        val socManufacturer: String,
+        /** Build.SOC_MODEL — derived from the hardware string; "" = unknown, not patched. */
+        val socModel: String,
+        /** Prebuilt WebView default user-agent (model + build ID already spoofed). */
+        val webViewUa: String,
     )
 
     data class Movement(
@@ -1046,6 +1199,10 @@ data class SpoofProfile(
         val ssid: String,
         val bssid: String,
         val transport: String,
+        /** Per-identity wlan0 MAC (locally administered) for NetworkInterface.getHardwareAddress. */
+        val wifiMac: String,
+        /** Per-identity Bluetooth MAC for BluetoothAdapter.getAddress. */
+        val bluetoothMac: String,
     )
 
     data class TelephonyInfo(
@@ -1055,6 +1212,15 @@ data class SpoofProfile(
         val deviceId: String,
         val subscriberId: String,
         val networkType: Int,
+        /** Per-identity ICCID (19-20 digits, 89 prefix) for getSimSerialNumber. */
+        val simSerial: String,
+    )
+
+    data class LocaleInfo(
+        /** IANA zone derived from the profile city, e.g. "Africa/Lagos". */
+        val timezoneId: String,
+        /** BCP-47 tag derived from the profile country, e.g. "en-NG". */
+        val localeTag: String,
     )
 
     // ------------------------------------------------------------------
@@ -1083,7 +1249,15 @@ data class SpoofProfile(
         jname("securityPatch"); append(':'); jstr(device.securityPatch); append(',')
         jname("displayId"); append(':'); jstr(device.displayId); append(',')
         jname("buildIncremental"); append(':'); jstr(device.buildIncremental); append(',')
-        jname("kernelVersion"); append(':'); jstr(device.kernelVersion)
+        jname("kernelVersion"); append(':'); jstr(device.kernelVersion); append(',')
+        jname("buildTime"); append(':'); append(device.buildTime.toString()); append(',')
+        jname("buildUser"); append(':'); jstr(device.buildUser); append(',')
+        jname("buildHost"); append(':'); jstr(device.buildHost); append(',')
+        jname("bootloader"); append(':'); jstr(device.bootloader); append(',')
+        jname("radio"); append(':'); jstr(device.radio); append(',')
+        jname("socManufacturer"); append(':'); jstr(device.socManufacturer); append(',')
+        jname("socModel"); append(':'); jstr(device.socModel); append(',')
+        jname("webViewUa"); append(':'); jstr(device.webViewUa)
         append("},")
         jname("androidId"); append(':'); jstr(androidId); append(',')
         append("\"location\":{")
@@ -1111,7 +1285,9 @@ data class SpoofProfile(
         append("\"network\":{")
         jname("ssid"); append(':'); jstr(network.ssid); append(',')
         jname("bssid"); append(':'); jstr(network.bssid); append(',')
-        jname("transport"); append(':'); jstr(network.transport)
+        jname("transport"); append(':'); jstr(network.transport); append(',')
+        jname("wifiMac"); append(':'); jstr(network.wifiMac); append(',')
+        jname("bluetoothMac"); append(':'); jstr(network.bluetoothMac)
         append("},")
         append("\"telephony\":{")
         jname("operatorName"); append(':'); jstr(telephony.operatorName); append(',')
@@ -1119,7 +1295,12 @@ data class SpoofProfile(
         jname("countryIso"); append(':'); jstr(telephony.countryIso); append(',')
         jname("deviceId"); append(':'); jstr(telephony.deviceId); append(',')
         jname("subscriberId"); append(':'); jstr(telephony.subscriberId); append(',')
-        jname("networkType"); append(':'); append(telephony.networkType.toString())
+        jname("networkType"); append(':'); append(telephony.networkType.toString()); append(',')
+        jname("simSerial"); append(':'); jstr(telephony.simSerial)
+        append("},")
+        append("\"locale\":{")
+        jname("timezoneId"); append(':'); jstr(locale.timezoneId); append(',')
+        jname("localeTag"); append(':'); jstr(locale.localeTag)
         append('}')
         append('}')
     }
@@ -1200,6 +1381,25 @@ data class SpoofProfile(
                     kernelVersion = (d["kernelVersion"] as? String)
                         ?.takeIf { it.isNotEmpty() }
                         ?: kernelForApi(apiLevel),
+                    buildTime = (d["buildTime"] as? Number)?.toLong()
+                        ?: deriveBuildTime(getStr(d, "securityPatch")),
+                    buildUser = (d["buildUser"] as? String)
+                        ?.takeIf { it.isNotEmpty() } ?: "android-build",
+                    buildHost = (d["buildHost"] as? String)
+                        ?.takeIf { it.isNotEmpty() } ?: "abfarm",
+                    bootloader = (d["bootloader"] as? String)
+                        ?.takeIf { it.isNotEmpty() } ?: "unknown",
+                    radio = (d["radio"] as? String)
+                        ?.takeIf { it.isNotEmpty() } ?: "unknown",
+                    socManufacturer = (d["socManufacturer"] as? String) ?: "",
+                    socModel = (d["socModel"] as? String) ?: "",
+                    webViewUa = (d["webViewUa"] as? String)
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: buildWebViewUa(
+                            getStr(d, "androidVersion"),
+                            getStr(d, "model"),
+                            buildId,
+                        ),
                     )
                 },
                 androidId = getStr(root, "androidId"),
@@ -1229,6 +1429,13 @@ data class SpoofProfile(
                     ssid = getStr(n, "ssid"),
                     bssid = getStr(n, "bssid"),
                     transport = getStr(n, "transport"),
+                    // Tolerant: profiles persisted before 2026-10-02 lack
+                    // these; derive fresh random values so old identities
+                    // still get coherent spoofing.
+                    wifiMac = (n["wifiMac"] as? String)
+                        ?.takeIf { it.isNotEmpty() } ?: newLocalMac(),
+                    bluetoothMac = (n["bluetoothMac"] as? String)
+                        ?.takeIf { it.isNotEmpty() } ?: newLocalMac(),
                 ),
                 telephony = TelephonyInfo(
                     operatorName = getStr(t, "operatorName"),
@@ -1239,7 +1446,21 @@ data class SpoofProfile(
                     // (e.g. pre-2026-10-01 identities) default to LTE.
                     networkType = (t["networkType"] as? Number)?.toInt() ?: 13,
                     subscriberId = getStr(t, "subscriberId"),
+                    simSerial = (t["simSerial"] as? String)
+                        ?.takeIf { it.isNotEmpty() } ?: newSimSerial(),
                 ),
+                locale = run {
+                    val lo = root["locale"] as? Map<*, *>
+                    val iso = getStr(t, "countryIso")
+                    LocaleInfo(
+                        timezoneId = (lo?.get("timezoneId") as? String)
+                            ?.takeIf { it.isNotEmpty() }
+                            ?: timezoneFor(iso),
+                        localeTag = (lo?.get("localeTag") as? String)
+                            ?.takeIf { it.isNotEmpty() }
+                            ?: localeFor(iso),
+                    )
+                },
             )
         }
 

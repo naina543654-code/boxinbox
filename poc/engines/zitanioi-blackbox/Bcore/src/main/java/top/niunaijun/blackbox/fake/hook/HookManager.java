@@ -57,6 +57,7 @@ import top.niunaijun.blackbox.fake.spoof.SensorSpoofInjector;
 import top.niunaijun.blackbox.fake.spoof.SysPropSpoofInjector;
 import top.niunaijun.blackbox.fake.spoof.JvmPropSpoofInjector;
 import top.niunaijun.blackbox.fake.spoof.TelephonyApiSpoofInjector;
+import top.niunaijun.blackbox.fake.spoof.OsIdentitySpoofInjector;
 import top.niunaijun.blackbox.fake.spoof.RootHideInjector;
 import top.niunaijun.blackbox.utils.Slog;
 import top.niunaijun.blackbox.utils.compat.BuildCompat;
@@ -127,6 +128,10 @@ public class HookManager {
             // (verified on-device), so hook the exact methods apps call.
             // No-op without an active profile.
             addInjector(new TelephonyApiSpoofInjector());
+            // Track E: OS-level identity Pine hooks (timezone, locale,
+            // Bluetooth name/address, wlan0 MAC, WebView default UA).
+            // No-op without an active profile.
+            addInjector(new OsIdentitySpoofInjector());
             addInjector(new RootHideInjector());
             addInjector(new IStorageManagerProxy());
             addInjector(new ILauncherAppsProxy());

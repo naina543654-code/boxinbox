@@ -26,6 +26,9 @@ object ProfileValidator {
         Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
     private val SUBSCRIBER_ID_RE = Regex("^[0-9]{15}$")
     private val BSSID_RE = Regex("^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
+    private val LOCAL_MAC_RE = Regex("^02(:[0-9A-F]{2}){5}$")
+    private val SIM_SERIAL_RE = Regex("^89\\d{17,18}$")
+    private val LOCALE_TAG_RE = Regex("^[a-z]{2,3}(-[A-Z][a-z]{3})?-[A-Z]{2}$")
     private val SECURITY_PATCH_RE = Regex("^\\d{4}-\\d{2}-\\d{2}$")
     private val KERNEL_RE = Regex("^\\d+\\.\\d+\\.\\d+(-android\\d+)?(-\\d+)*(-g[0-9a-f]+)?$")
 
@@ -131,6 +134,30 @@ object ProfileValidator {
             violations += "device.kernelVersion '${dev.kernelVersion}' is not a plausible kernel version"
         }
 
+        // New spoof surface (2026-10-02, batch 2): extended build metadata,
+        // SoC, WebView UA.
+        if (dev.buildTime <= 0) violations += "device.buildTime ${dev.buildTime} is not positive"
+        if (dev.buildUser.isBlank()) violations += "device.buildUser is blank"
+        if (dev.buildHost.isBlank()) violations += "device.buildHost is blank"
+        if (dev.bootloader.isBlank()) violations += "device.bootloader is blank"
+        if (dev.radio.isBlank()) violations += "device.radio is blank"
+        // socManufacturer/socModel may be "" (unknown hardware) — but they
+        // must agree: never one set and the other blank.
+        if (dev.socManufacturer.isBlank() != dev.socModel.isBlank()) {
+            violations += "device.socManufacturer/socModel disagree: " +
+                "'${dev.socManufacturer}' / '${dev.socModel}'"
+        }
+        if (!dev.webViewUa.startsWith("Mozilla/5.0 (Linux; Android ")) {
+            violations += "device.webViewUa does not look like an Android WebView UA"
+        } else {
+            if (!dev.webViewUa.contains(dev.model)) {
+                violations += "device.webViewUa does not contain the spoofed model '${dev.model}'"
+            }
+            if (!dev.webViewUa.contains(dev.buildId)) {
+                violations += "device.webViewUa does not contain the spoofed build ID '${dev.buildId}'"
+            }
+        }
+
         // Location sanity.
         val loc = sp.location
         if (loc.latitude !in -90.0..90.0) {
@@ -167,6 +194,12 @@ object ProfileValidator {
             violations += "network.bssid '${sp.network.bssid}' is not a MAC address"
         }
         if (sp.network.transport.isBlank()) violations += "network.transport is blank"
+        if (!LOCAL_MAC_RE.matches(sp.network.wifiMac)) {
+            violations += "network.wifiMac '${sp.network.wifiMac}' is not a locally-administered MAC"
+        }
+        if (!LOCAL_MAC_RE.matches(sp.network.bluetoothMac)) {
+            violations += "network.bluetoothMac '${sp.network.bluetoothMac}' is not a locally-administered MAC"
+        }
 
         // Telephony.
         if (!ANDROID_ID_RE.matches(sp.telephony.deviceId)) {
@@ -182,6 +215,18 @@ object ProfileValidator {
         if (sp.telephony.countryIso.isBlank()) violations += "telephony.countryIso is blank"
         if (sp.telephony.networkType !in setOf(13, 20, 10)) {
             violations += "telephony.networkType '${sp.telephony.networkType}' is not one of LTE(13)/NR(20)/HSPA(10)"
+        }
+        if (!SIM_SERIAL_RE.matches(sp.telephony.simSerial)) {
+            violations += "telephony.simSerial '${sp.telephony.simSerial}' is not a 19-20 digit ICCID"
+        }
+
+        // Locale: timezone and locale tag must be coherent with each other
+        // (both derive from the same country).
+        if (!sp.locale.timezoneId.contains('/')) {
+            violations += "locale.timezoneId '${sp.locale.timezoneId}' is not a plausible IANA zone"
+        }
+        if (!LOCALE_TAG_RE.matches(sp.locale.localeTag)) {
+            violations += "locale.localeTag '${sp.locale.localeTag}' is not a BCP-47 language-region tag"
         }
 
         return violations
