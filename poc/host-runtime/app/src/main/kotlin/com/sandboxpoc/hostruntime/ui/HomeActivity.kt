@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.widget.LinearLayout
 import android.widget.Toast
+import com.sandboxpoc.hostruntime.R
 import com.sandboxpoc.hostruntime.SandboxApp
 import com.sandboxpoc.hostruntime.runtime.BlackBoxRuntime
 
@@ -60,6 +61,7 @@ class HomeActivity : Activity() {
         root.addView(Ui.button(this, "Settings") {
             startActivity(Intent(this, SettingsActivity::class.java))
         })
+        root.addView(Ui.row(this, "Build: ${getString(R.string.build_version)}"))
 
         setContentView(Ui.page(root))
     }

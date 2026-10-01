@@ -53,6 +53,15 @@ see `poc/SPOOFING_MATRIX.md` for the verification matrix.
   Camera characteristics assessed: Unsupported (no public constructor;
   per-device HAL specs unresearched) — documented gap.
   All three binaries rebuilt locally and verified in-dex. UNVERIFIED on-device.
+- `UNRELEASED-STAMP` — Build identification (this commit): git SHA + commit
+  date are now stamped into both APKs at build time (`poc/version-stamp.sh`;
+  `FORCE_SHA`/`FORCE_DATE` overrides for the release flow, since the stamped
+  APKs are committed after the sources). The probe shows a
+  `Probe build: <sha> (<date)>` footer plus a `probe_build` row in the report
+  header; the host home screen shows a `Build: <sha> (<date)>` footer; both
+  APK `versionName`s carry the SHA (`1.0-<sha>`, `1.0-poc-runtime-<sha>`).
+  Wired into both the Gradle and manual build paths. Added after repeated
+  stale-install confusion on-device made the installed build unverifiable.
 
 ## `poc-v2.2` — `15b015b` (2026-10-01)
 

@@ -43,6 +43,10 @@ DEPS=$ENG_MB/deps
 
 mkdir -p "$MB" "$APKS"
 
+# Version stamp: git SHA + date -> res/values/version.xml and versionName,
+# so an installed APK is always identifiable (footer on the home screen).
+eval "$("$HR/../version-stamp.sh")"
+
 s_manifest() {  # merge engine manifest components into the host manifest
   python3 "$HR/merge-manifest.py" \
     "$WS/AndroidManifest.xml" \
@@ -62,12 +66,20 @@ s_link() {  # aapt2: engine res + appcompat res -> base.apk + R.java + R.txt
   "$BT/aapt2" compile --dir "$AC_TMP/res" -o "$MB/appcompat-res.zip"
   "$BT/aapt2" compile --dir "$ENGINE/manual-build/attr-workaround" -o "$MB/fixattr.zip"
   "$BT/aapt2" compile --dir "$WS/res" -o "$MB/host-res.zip"
-  ( cd "$MB/flat" && unzip -q -o ../engine-res.zip && unzip -q -o ../appcompat-res.zip && unzip -q -o ../fixattr.zip && unzip -q -o ../host-res.zip )
+  mkdir -p "$MB/version-res/values"
+  cat > "$MB/version-res/values/version.xml" <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="build_version">$SHA ($DATE)</string>
+</resources>
+EOF
+  "$BT/aapt2" compile --dir "$MB/version-res" -o "$MB/version-res.zip"
+  ( cd "$MB/flat" && unzip -q -o ../engine-res.zip && unzip -q -o ../appcompat-res.zip && unzip -q -o ../fixattr.zip && unzip -q -o ../host-res.zip && unzip -q -o ../version-res.zip )
   "$BT/aapt2" link -o "$MB/base.apk" \
     -I "$AJAR" \
     --manifest "$MB/AndroidManifest-merged.xml" \
     --min-sdk-version 33 --target-sdk-version 35 \
-    --version-code 1 --version-name "$VER_NAME" \
+    --version-code 1 --version-name "$VER_NAME-$SHA" \
     --java "$MB/gen" \
     --output-text-symbols "$MB/R-merged.txt" \
     $(find "$MB/flat" -name "*.flat" | sort)

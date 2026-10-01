@@ -135,6 +135,13 @@ public class MainActivity extends Activity {
         root.addView(copyBtn);
         root.addView(sv, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        TextView footer = new TextView(this);
+        footer.setText("Probe build: " + getString(R.string.build_version));
+        footer.setTextSize(11);
+        footer.setPadding(16, 8, 16, 16);
+        root.addView(footer);
+
         setContentView(root);
 
         startCollection();
@@ -223,6 +230,7 @@ public class MainActivity extends Activity {
         h("SANDBOX PROBE REPORT");
         kv("generated_at", stamp());
         kv("probe_package", getPackageName());
+        kv("probe_build", getString(R.string.build_version));
     }
 
     private void sectionApp() {

@@ -1,3 +1,17 @@
+// Build stamp: git SHA + date baked into res/values/version.xml and versionName,
+// so an installed APK is always identifiable (footer in the app + probe_build row
+// in the report). Falls back to "unknown" outside a git checkout.
+def buildSha = "unknown"
+def buildDate = "unknown"
+try {
+    def s = "git -C ${rootDir}/.. rev-parse --short HEAD".execute().text.trim()
+    if (!s.isEmpty()) buildSha = s
+} catch (Exception ignored) {}
+try {
+    def d = "git -C ${rootDir}/.. show -s --format=%cs HEAD".execute().text.trim()
+    if (!d.isEmpty()) buildDate = d
+} catch (Exception ignored) {}
+
 apply plugin: 'com.android.application'
 
 android {
@@ -9,7 +23,13 @@ android {
         minSdk 33
         targetSdk 35
         versionCode 1
-        versionName '1.0'
+        versionName "1.0-${buildSha}"
+    }
+
+    sourceSets {
+        main {
+            res.srcDirs += "${buildDir}/generated/versionRes"
+        }
     }
 
     buildTypes {
@@ -25,6 +45,18 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 }
+
+tasks.register("generateVersionRes") {
+    def outDir = layout.buildDirectory.dir("generated/versionRes/values")
+    outputs.dir(outDir)
+    doLast {
+        outDir.get().asFile.mkdirs()
+        new File(outDir.get().asFile, "version.xml").text =
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n" +
+            "    <string name=\"build_version\">${buildSha} (${buildDate})</string>\n</resources>\n"
+    }
+}
+tasks.named("preBuild") { dependsOn("generateVersionRes") }
 
 dependencies {
     // For GoogleApiAvailability availability-code check only.

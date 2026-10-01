@@ -3,6 +3,16 @@ plugins {
     kotlin("android")
 }
 
+// Build stamp: git SHA + date baked into res/values/version.xml and versionName,
+// so an installed APK is always identifiable (footer on the home screen).
+// Falls back to "unknown" outside a git checkout.
+fun gitOut(vararg args: String): String = try {
+    Runtime.getRuntime().exec(arrayOf("git", "-C", "${rootDir}/..") + args)
+        .inputStream.bufferedReader().readText().trim().ifEmpty { "unknown" }
+} catch (e: Exception) { "unknown" }
+val buildSha = gitOut("rev-parse", "--short", "HEAD")
+val buildDate = gitOut("show", "-s", "--format=%cs", "HEAD")
+
 android {
     namespace = "com.sandboxpoc.hostruntime"
     compileSdk = 35
@@ -12,7 +22,13 @@ android {
         minSdk = 33
         targetSdk = 35
         versionCode = 1
-        versionName = "1.0-poc-runtime"
+        versionName = "1.0-poc-runtime-$buildSha"
+    }
+
+    sourceSets {
+        getByName("main") {
+            res.srcDirs("$buildDir/generated/versionRes")
+        }
     }
 
     buildTypes {
@@ -30,6 +46,19 @@ android {
         jvmTarget = "17"
     }
 }
+
+val generateVersionRes by tasks.registering {
+    val outDir = layout.buildDirectory.dir("generated/versionRes/values")
+    outputs.dir(outDir)
+    doLast {
+        outDir.get().asFile.mkdirs()
+        outDir.get().asFile.resolve("version.xml").writeText(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n" +
+            "    <string name=\"build_version\">$buildSha ($buildDate)</string>\n</resources>\n"
+        )
+    }
+}
+tasks.named("preBuild") { dependsOn(generateVersionRes) }
 
 dependencies {
     // BlackBox engine, built from source (zitanioi/blackbox) via

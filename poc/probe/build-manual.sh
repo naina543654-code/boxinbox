@@ -26,6 +26,16 @@ OUT="${1:-$PROBE/../apks/probe-v1.apk}"
 W="$(mktemp -d)"
 trap 'rm -rf "$W"' EXIT
 
+# --- version stamp: git SHA + date -> res/values/version.xml and versionName ---
+eval "$("$PROBE/../version-stamp.sh")"
+mkdir -p "$W/version-res/values"
+cat > "$W/version-res/values/version.xml" <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="build_version">$SHA ($DATE)</string>
+</resources>
+EOF
+
 # --- 0. play-services classes (extract once, reuse) ---
 GMS="$W/gms"
 mkdir -p "$GMS"
@@ -51,17 +61,21 @@ sed 's|<manifest xmlns:android="http://schemas.android.com/apk/res/android">|<ma
 # Compile the app's own res/ (mipmap/ic_launcher etc.) — without this the
 # link step fails with "resource mipmap/ic_launcher not found".
 "$BT/aapt2" compile --dir "$PROBE/app/src/main/res" -o "$W/probe-res.zip"
+"$BT/aapt2" compile --dir "$W/version-res" -o "$W/version-res.zip"
 "$BT/aapt2" link -o "$W/base.apk" -I "$PLATFORM" \
   -R "$W/probe-res.zip" \
+  -R "$W/version-res.zip" \
+  --auto-add-overlay \
   --manifest "$W/AndroidManifest.xml" \
   --min-sdk-version 33 --target-sdk-version 35 \
-  --version-code 1 --version-name 1.0
+  --version-code 1 --version-name "1.0-$SHA" \
+  --java "$W/gen"
 
 # --- 2. javac ---
 mkdir -p "$W/classes"
 "$JAVA_HOME/bin/javac" -encoding UTF-8 -source 17 -target 17 -nowarn \
   -classpath "$CP" -d "$W/classes" \
-  $(find "$PROBE/app/src/main/java" -name "*.java")
+  $(find "$PROBE/app/src/main/java" "$W/gen" -name "*.java")
 
 # --- 3. d8 (dex) ---
 mkdir -p "$W/dex"
