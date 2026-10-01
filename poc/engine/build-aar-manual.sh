@@ -106,7 +106,20 @@ s_res() {  # aapt2 compile engine res (+appcompat, needed by LauncherTheme) -> R
     --java "$WORK/gen-r" \
     --output-text-symbols "$WORK/R.txt" \
     --min-sdk-version 21 --target-sdk-version 30 \
-    $(find "$WORK/flat" -name "*.flat")
+    $(find "$WORK/flat" -name "*.flat" | sort)
+  # De-finalize the generated R BEFORE javac: real AGP library builds use
+  # non-final R fields, so referencing classes emit getstatic instead of
+  # inlining the IDs as constants. The final IDs are assigned at APP build
+  # time (AGP honors the AAR's R.txt; the manual APK build regenerates R via
+  # gen-engine-r.py), and the prebuilt classes resolve them at runtime.
+  # Inlined constants BREAK whenever the app build's aapt2 run assigns
+  # different IDs than this standalone run did — e.g. the manual APK build's
+  # merged link, whose input order is nondeterministic. (Verified: no
+  # switch(R) or R-valued annotations in the engine sources, so non-final R
+  # compiles cleanly.)
+  find "$WORK/gen-r" -name 'R.java' -exec sed -i \
+    -e 's/public static final class/public static class/g' \
+    -e 's/public static final int/public static int/g' {} +
   # NOTE: R.java is intentionally NOT compiled into classes.jar. A standard AGP-built
   # AAR never ships R classes — the consuming app build regenerates them from R.txt +
   # res/. Shipping them caused Gradle's AarToClassTransform to fail with

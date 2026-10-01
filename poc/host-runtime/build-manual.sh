@@ -69,7 +69,7 @@ s_link() {  # aapt2: engine res + appcompat res -> base.apk + R.java + R.txt
     --version-code 1 --version-name "$VER_NAME" \
     --java "$MB/gen" \
     --output-text-symbols "$MB/R-merged.txt" \
-    $(find "$MB/flat" -name "*.flat")
+    $(find "$MB/flat" -name "*.flat" | sort)
   # engine R.java (for the prebuilt engine classes' non-final R references)
   mkdir -p "$MB/gen-engine/top/niunaijun/blackbox"
   python3 "$HR/gen-engine-r.py" "$MB/R-merged.txt" "$ENG_RTXT" \
