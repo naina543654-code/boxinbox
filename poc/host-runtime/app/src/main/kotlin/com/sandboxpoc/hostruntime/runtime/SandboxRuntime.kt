@@ -20,6 +20,17 @@ interface SandboxRuntime {
     /** Install a guest APK (by file path) into the virtual runtime. */
     fun installApplication(apkPath: String)
 
+    /**
+     * Install a guest APK plus its split APKs (base first, then splits) into
+     * the virtual runtime. Split APKs cover config/density splits of
+     * bundle-distributed apps — without them such apps crash with
+     * Resources$NotFoundException. Default: base APK only.
+     */
+    fun installApplicationWithSplits(apkPaths: List<String>) {
+        require(apkPaths.isNotEmpty()) { "no APKs to install" }
+        installApplication(apkPaths[0])
+    }
+
     /** Uninstall a guest package from the virtual runtime. */
     fun uninstallApplication(packageName: String)
 

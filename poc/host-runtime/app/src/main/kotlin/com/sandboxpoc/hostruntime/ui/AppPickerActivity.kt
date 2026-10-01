@@ -7,12 +7,14 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.Toast
 import com.sandboxpoc.hostruntime.SandboxApp
+import java.io.File
 
 /**
  * Lists launchable host apps (name, icon, packageName, versionName). On
- * select, resolves the APK path (sourceDir/publicSourceDir) and installs it
- * into the sandbox. A warning is shown first: only the APK artifact is used —
- * the source app's private data is never copied.
+ * select, resolves the APK path (sourceDir/publicSourceDir) plus any split
+ * APKs (splitSourceDirs) and installs them into the sandbox. A warning is
+ * shown first: only APK artifacts are used — the source app's private data
+ * is never copied.
  */
 class AppPickerActivity : Activity() {
 
@@ -23,6 +25,7 @@ class AppPickerActivity : Activity() {
         val packageName: String,
         val versionName: String?,
         val apkPath: String,
+        val splitApkPaths: List<String>,
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -57,18 +60,19 @@ class AppPickerActivity : Activity() {
             val ai = ri.activityInfo?.applicationInfo ?: return@mapNotNull null
             if (ai.packageName == packageName) return@mapNotNull null // skip self
             val apkPath = ai.publicSourceDir ?: ai.sourceDir ?: return@mapNotNull null
+            val splits = ai.splitSourceDirs?.filter { File(it).isFile }.orEmpty()
             val label = pm.getApplicationLabel(ai)?.toString() ?: ai.packageName
             val version = runCatching {
                 pm.getPackageInfo(ai.packageName, PackageManager.PackageInfoFlags.of(0)).versionName
             }.getOrNull()
-            AppEntry(label, ai.packageName, version, apkPath)
+            AppEntry(label, ai.packageName, version, apkPath, splits)
         }.sortedBy { it.label.lowercase() }
     }
 
     private fun confirmInstall(entry: AppEntry) {
         AlertDialog.Builder(this)
             .setTitle("Clone \"${entry.label}\"?")
-            .setMessage("WARNING: only the APK artifact (${entry.apkPath}) will be copied " +
+            .setMessage("WARNING: only APK artifacts (base + ${entry.splitApkPaths.size} split(s)) will be copied " +
                 "into the sandbox. The app's private data is NEVER copied. " +
                 "The guest starts with a clean slate inside the virtual identity.")
             .setPositiveButton("Install into sandbox") { _, _ -> doInstall(entry) }
@@ -82,10 +86,13 @@ class AppPickerActivity : Activity() {
             Toast.makeText(this, "Generate an identity first", Toast.LENGTH_LONG).show()
             return
         }
-        val staged = try {
-            // App-layer record: stage ONLY the APK artifact. Never app data.
-            app.storage.stageApk(identity.id, entry.apkPath).also {
-                app.log.i("guest", "staged APK ${entry.packageName} -> ${it.absolutePath}")
+        val stagedPaths = try {
+            // App-layer record: stage ONLY APK artifacts (base + splits).
+            // Never app data.
+            (listOf(entry.apkPath) + entry.splitApkPaths).map { p ->
+                app.storage.stageApk(identity.id, p).also {
+                    app.log.i("guest", "staged APK ${entry.packageName} -> ${it.absolutePath}")
+                }.absolutePath
             }
         } catch (e: Exception) {
             AlertDialog.Builder(this).setTitle("Staging failed")
@@ -94,9 +101,9 @@ class AppPickerActivity : Activity() {
         }
         Ui.bg(this,
             work = {
-                // Install the staged copy (app-private) into the virtual user.
-                app.runtime.installApplication(staged.absolutePath)
-                app.log.i("runtime", "installApplication(${entry.packageName}) ok")
+                // Install the staged copies (app-private) into the virtual user.
+                app.runtime.installApplicationWithSplits(stagedPaths)
+                app.log.i("runtime", "installApplicationWithSplits(${entry.packageName}, ${stagedPaths.size} apks) ok")
                 "OK: installed ${entry.label} into sandbox"
             })
     }
