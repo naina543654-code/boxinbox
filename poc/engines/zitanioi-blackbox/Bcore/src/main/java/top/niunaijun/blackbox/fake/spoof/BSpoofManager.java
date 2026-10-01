@@ -262,26 +262,30 @@ public class BSpoofManager {
         if (mLoaded) {
             return;
         }
-        mLoaded = true;
+        // NOTE: mLoaded is only set after a successful parse. A missing
+        // context, missing file, or parse failure leaves mLoaded=false so the
+        // next hook call retries — a transient early-init state must never
+        // permanently disable spoofing for the life of the process.
         try {
             Context hostContext = BlackBoxCore.getContext();
             if (hostContext == null) {
-                Slog.w(TAG, "ensureLoaded: host context not ready yet");
+                Slog.w(TAG, "ensureLoaded: host context not ready yet — will retry");
                 return;
             }
             File profileFile = new File(hostContext.getFilesDir(), PROFILE_REL_PATH);
             if (!profileFile.isFile()) {
                 Slog.d(TAG, "ensureLoaded: no profile at " + profileFile.getAbsolutePath()
-                        + " — spoofing inactive, hooks pass through");
+                        + " — spoofing inactive, hooks pass through (will retry)");
                 return;
             }
             JSONObject root = new JSONObject(readFully(profileFile));
             parse(root);
+            mLoaded = true;
             mSpoofActive = true;
             Slog.d(TAG, "ensureLoaded: spoof profile active: "
                     + root.optString("profileId", "<unknown>"));
         } catch (Throwable t) {
-            Slog.w(TAG, "ensureLoaded: failed to parse spoof profile — spoofing inactive", t);
+            Slog.w(TAG, "ensureLoaded: failed to parse spoof profile — spoofing inactive (will retry)", t);
             mSpoofActive = false;
         }
     }

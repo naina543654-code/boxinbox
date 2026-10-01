@@ -194,9 +194,12 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             Log.d(TAG, "getNetworkOperator");
             BSpoofManager spoof = BSpoofManager.get();
-            if (spoof.isSpoofActive() && spoof.getOperatorNumeric() != null) {
+            boolean active = spoof.isSpoofActive();
+            if (active && spoof.getOperatorNumeric() != null) {
+                Log.d(TAG, "getNetworkOperator: spoofed=" + spoof.getOperatorNumeric());
                 return spoof.getOperatorNumeric();
             }
+            Log.d(TAG, "getNetworkOperator: passthrough (spoofActive=" + active + ")");
             return method.invoke(who, args);
         }
     }
@@ -215,9 +218,12 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             BSpoofManager spoof = BSpoofManager.get();
-            if (spoof.isSpoofActive() && spoof.getOperatorName() != null) {
+            boolean active = spoof.isSpoofActive();
+            if (active && spoof.getOperatorName() != null) {
+                Log.d(TAG, "getNetworkOperatorName: spoofed=" + spoof.getOperatorName());
                 return spoof.getOperatorName();
             }
+            Log.d(TAG, "getNetworkOperatorName: passthrough (spoofActive=" + active + ")");
             return method.invoke(who, args);
         }
     }
@@ -227,9 +233,12 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             BSpoofManager spoof = BSpoofManager.get();
-            if (spoof.isSpoofActive() && spoof.getOperatorNumeric() != null) {
+            boolean active = spoof.isSpoofActive();
+            if (active && spoof.getOperatorNumeric() != null) {
+                Log.d(TAG, "getSimOperator: spoofed=" + spoof.getOperatorNumeric());
                 return spoof.getOperatorNumeric();
             }
+            Log.d(TAG, "getSimOperator: passthrough (spoofActive=" + active + ")");
             return method.invoke(who, args);
         }
     }
@@ -239,9 +248,12 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             BSpoofManager spoof = BSpoofManager.get();
-            if (spoof.isSpoofActive() && spoof.getOperatorName() != null) {
+            boolean active = spoof.isSpoofActive();
+            if (active && spoof.getOperatorName() != null) {
+                Log.d(TAG, "getSimOperatorName: spoofed=" + spoof.getOperatorName());
                 return spoof.getOperatorName();
             }
+            Log.d(TAG, "getSimOperatorName: passthrough (spoofActive=" + active + ")");
             return method.invoke(who, args);
         }
     }
@@ -251,9 +263,12 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             BSpoofManager spoof = BSpoofManager.get();
-            if (spoof.isSpoofActive() && spoof.getCountryIso() != null) {
+            boolean active = spoof.isSpoofActive();
+            if (active && spoof.getCountryIso() != null) {
+                Log.d(TAG, "getSimCountryIso: spoofed=" + spoof.getCountryIso());
                 return spoof.getCountryIso();
             }
+            Log.d(TAG, "getSimCountryIso: passthrough (spoofActive=" + active + ")");
             return method.invoke(who, args);
         }
     }
@@ -263,9 +278,12 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             BSpoofManager spoof = BSpoofManager.get();
-            if (spoof.isSpoofActive() && spoof.getCountryIso() != null) {
+            boolean active = spoof.isSpoofActive();
+            if (active && spoof.getCountryIso() != null) {
+                Log.d(TAG, "getNetworkCountryIso: spoofed=" + spoof.getCountryIso());
                 return spoof.getCountryIso();
             }
+            Log.d(TAG, "getNetworkCountryIso: passthrough (spoofActive=" + active + ")");
             return method.invoke(who, args);
         }
     }
@@ -282,12 +300,15 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             BSpoofManager spoof = BSpoofManager.get();
-            if (spoof.isSpoofActive()) {
+            boolean active = spoof.isSpoofActive();
+            if (active) {
                 int nt = spoof.getNetworkType();
                 if (nt >= 0) {
+                    Log.d(TAG, "getDataNetworkType: spoofed=" + nt);
                     return nt;
                 }
             }
+            Log.d(TAG, "getDataNetworkType: passthrough (spoofActive=" + active + ")");
             try {
                 return method.invoke(who, args);
             } catch (Throwable e) {
@@ -301,12 +322,15 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             BSpoofManager spoof = BSpoofManager.get();
-            if (spoof.isSpoofActive()) {
+            boolean active = spoof.isSpoofActive();
+            if (active) {
                 int nt = spoof.getNetworkType();
                 if (nt >= 0) {
+                    Log.d(TAG, "getVoiceNetworkType: spoofed=" + nt);
                     return nt;
                 }
             }
+            Log.d(TAG, "getVoiceNetworkType: passthrough (spoofActive=" + active + ")");
             try {
                 return method.invoke(who, args);
             } catch (Throwable e) {
