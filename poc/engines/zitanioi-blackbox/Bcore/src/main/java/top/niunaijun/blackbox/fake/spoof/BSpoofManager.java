@@ -10,7 +10,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -237,10 +236,12 @@ public class BSpoofManager {
         try {
             Field field = Build.class.getDeclaredField(fieldName);
             field.setAccessible(true);
-            // Strip the final modifier so ART accepts the write.
-            Field modifiersField = Field.class.getDeclaredField("modifiers");
-            modifiersField.setAccessible(true);
-            modifiersField.setInt(field, field.getModifiers() & ~Modifier.FINAL);
+            // NOTE (2026-10-01): do NOT use the old "Field.modifiers" trick to strip
+            // final — java.lang.reflect.Field has no such declared field on modern
+            // Android (NoSuchFieldException), so every patch was silently failing and
+            // guests saw the real host Build values. Plain setAccessible + set is
+            // sufficient on ART for these non-constant static finals (they are
+            // assigned via getString() in <clinit>, not compile-time constants).
             field.set(null, value);
         } catch (Throwable t) {
             Slog.w(TAG, "applyBuildSpoofing: failed to patch Build." + fieldName, t);
