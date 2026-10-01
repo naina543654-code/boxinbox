@@ -54,6 +54,8 @@ import top.niunaijun.blackbox.fake.service.context.RestrictionsManagerStub;
 import top.niunaijun.blackbox.fake.service.libcore.OsStub;
 import top.niunaijun.blackbox.fake.spoof.BSpoofManager;
 import top.niunaijun.blackbox.fake.spoof.SensorSpoofInjector;
+import top.niunaijun.blackbox.fake.spoof.SysPropSpoofInjector;
+import top.niunaijun.blackbox.fake.spoof.RootHideInjector;
 import top.niunaijun.blackbox.utils.Slog;
 import top.niunaijun.blackbox.utils.compat.BuildCompat;
 
@@ -105,6 +107,13 @@ public class HookManager {
             // Track C: filter guest-visible sensors to the active spoof profile's
             // sensor list via Pine ART hooks (no-op without an active profile).
             addInjector(new SensorSpoofInjector());
+            // Track C: spoof telephony operator identity at the SystemProperties
+            // choke point. On API 30+ TelephonyManager getters read
+            // gsm.operator.*/gsm.sim.operator.* properties directly instead of
+            // making binder calls, so the ITelephonyManagerProxy hooks never
+            // fire for them. No-op without an active profile.
+            addInjector(new SysPropSpoofInjector());
+            addInjector(new RootHideInjector());
             addInjector(new IStorageManagerProxy());
             addInjector(new ILauncherAppsProxy());
             addInjector(new IJobServiceProxy());

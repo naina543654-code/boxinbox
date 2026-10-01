@@ -22,6 +22,7 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -428,6 +429,45 @@ public class PackageManagerCompat {
         ai.processName = BPackageManagerService.fixProcessName(p.packageName, ai.packageName);
         ai.publicSourceDir = sourceDir;
         ai.sourceDir = sourceDir;
+        // Split-APK support: the host app clones split APKs (config/density
+        // splits) alongside base.apk as split_*.apk. Expose them so the
+        // framework's LoadedApk loads split resources via AssetManager.
+        // Without this, bundle-distributed apps crash with
+        // Resources$NotFoundException for resources living in config splits.
+        try {
+            File codeDir = new File(sourceDir).getParentFile();
+            File[] splitFiles = codeDir == null ? null : codeDir.listFiles(
+                    (dir, name) -> name.startsWith("split_") && name.endsWith(".apk"));
+            if (splitFiles != null && splitFiles.length > 0) {
+                Arrays.sort(splitFiles);
+                String[] splitPaths = new String[splitFiles.length];
+                String[] splitNames = new String[splitFiles.length];
+                for (int i = 0; i < splitFiles.length; i++) {
+                    splitPaths[i] = splitFiles[i].getAbsolutePath();
+                    // Derive the real split name from the original filename
+                    // (split_<name>.apk, preserved by the host app at clone
+                    // time). LoadedApk.registerAppInfoToArt reads
+                    // ApplicationInfo.splitNames[i] for every splitSourceDirs
+                    // entry — a null array NPEs there.
+                    String name = splitFiles[i].getName();
+                    if (name.startsWith("split_") && name.endsWith(".apk")) {
+                        name = name.substring("split_".length(), name.length() - ".apk".length());
+                    } else if (name.endsWith(".apk")) {
+                        name = name.substring(0, name.length() - ".apk".length());
+                    }
+                    splitNames[i] = name;
+                }
+                ai.splitSourceDirs = splitPaths;
+                ai.splitPublicSourceDirs = splitPaths;
+                ai.splitNames = splitNames;
+            } else {
+                ai.splitSourceDirs = null;
+                ai.splitPublicSourceDirs = null;
+                ai.splitNames = null;
+            }
+        } catch (Throwable t) {
+            Slog.w("PackageManagerCompat", "split APK scan failed for " + ai.packageName, t);
+        }
         ai.uid = p.mExtras.appId;
 //        ai.uid = baseApplication.uid;
 

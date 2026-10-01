@@ -58,6 +58,33 @@ class BlackBoxRuntime : SandboxRuntime {
         return core().getInstalledPackages(0, VIRTUAL_USER_ID).map { it.packageName }.sorted()
     }
 
+    /** Whether the engine's GMS packages live in the virtual user (UI helper). */
+    fun isGmsInstalled(): Boolean {
+        checkBackground()
+        return core().isInstallGms(VIRTUAL_USER_ID)
+    }
+
+    /**
+     * Clones the host's real Google Play Services packages
+     * (com.google.android.gms, com.google.android.gsf, …) into the virtual
+     * user via the engine's GmsCore. Guests that gate on
+     * GoogleApiAvailability (e.g. Wakie) refuse to connect without this.
+     * Heavy (hundreds of MB), so it is explicit — never automatic.
+     * Returns a human-readable result for the UI.
+     */
+    fun installGoogleServices(): String {
+        checkBackground()
+        return try {
+            val result = core().installGms(VIRTUAL_USER_ID)
+            lastError = null
+            if (result.success) "OK: Google Play Services installed in this identity"
+            else "FAIL: GMS install refused: ${result.msg ?: "no details"}"
+        } catch (e: Exception) {
+            lastError = "installGms: ${e.message}"
+            "FAIL: ${e.message}"
+        }
+    }
+
     /**
      * Stage the active spoof profile as `expected_profile.json` inside the
      * guest's virtual files dir, before the guest is launched.
