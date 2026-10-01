@@ -308,8 +308,8 @@ object ProfileGenerator {
             buildHost = "abfarm",
             bootloader = "unknown",
             radio = "unknown",
-            socManufacturer = socFor(row.hardware).first,
-            socModel = socFor(row.hardware).second,
+            socManufacturer = socFor(row.hardware, row.model).first,
+            socModel = socFor(row.hardware, row.model).second,
             webViewUa = buildWebViewUa(row.androidVersion, row.model, row.buildId),
         )
         return SpoofProfile(

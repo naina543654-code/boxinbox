@@ -65,10 +65,19 @@ internal fun deriveBuildTime(securityPatch: String): Long {
 
 /**
  * SoC (ro.soc.manufacturer / ro.soc.model) derived from the device's
- * `hardware` string. Only rows whose hardware maps to a verified SoC are
+ * `hardware` string, with a model override where the platform codename
+ * covers more than one SoC (lahaina = both Snapdragon 888 and 778G).
+ * Only rows whose hardware maps to a verified SoC are
  * covered — unknown values return ("", "") and the engine skips the patch.
  */
-internal fun socFor(hardware: String): Pair<String, String> = when (hardware) {
+internal fun socFor(hardware: String, model: String): Pair<String, String> {
+    // Model wins over platform codename where they disagree: the Galaxy
+    // A52s (SM-A528B) and A73 5G (SM-A736B) report board "lahaina" but
+    // carry the Snapdragon 778G, not the 888.
+    if (model == "SM-A528B" || model == "SM-A736B") {
+        return "Qualcomm" to "Snapdragon 778G"
+    }
+    return when (hardware) {
     "s5e9925" -> "Samsung" to "Exynos 2400"
     "s5e8835" -> "Samsung" to "Exynos 1480"
     "s5e8825", "exynos1380" -> "Samsung" to "Exynos 1380"
@@ -79,6 +88,7 @@ internal fun socFor(hardware: String): Pair<String, String> = when (hardware) {
     "raven", "oriole", "bluejay" -> "Google" to "Tensor"
     "panther", "cheetah", "lynx", "felix" -> "Google" to "Tensor G2"
     else -> "" to ""
+    }
 }
 
 /**

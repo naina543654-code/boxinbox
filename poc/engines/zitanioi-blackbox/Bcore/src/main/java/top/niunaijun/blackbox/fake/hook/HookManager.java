@@ -58,6 +58,7 @@ import top.niunaijun.blackbox.fake.spoof.SysPropSpoofInjector;
 import top.niunaijun.blackbox.fake.spoof.JvmPropSpoofInjector;
 import top.niunaijun.blackbox.fake.spoof.TelephonyApiSpoofInjector;
 import top.niunaijun.blackbox.fake.spoof.OsIdentitySpoofInjector;
+import top.niunaijun.blackbox.fake.spoof.NetworkSpoofInjector;
 import top.niunaijun.blackbox.fake.spoof.RootHideInjector;
 import top.niunaijun.blackbox.utils.Slog;
 import top.niunaijun.blackbox.utils.compat.BuildCompat;
@@ -132,6 +133,10 @@ public class HookManager {
             // Bluetooth name/address, wlan0 MAC, WebView default UA).
             // No-op without an active profile.
             addInjector(new OsIdentitySpoofInjector());
+            // Track F: hide the host's real VPN from guests (TRANSPORT_VPN,
+            // tun0 interface name, VPN NetworkInfo type) at the
+            // ConnectivityManager API. No-op without an active profile.
+            addInjector(new NetworkSpoofInjector());
             addInjector(new RootHideInjector());
             addInjector(new IStorageManagerProxy());
             addInjector(new ILauncherAppsProxy());
