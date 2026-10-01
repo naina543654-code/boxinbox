@@ -97,7 +97,9 @@ s_kotlin() {  # kotlinc host sources + R.java -> classes
   mkdir -p "$MB/classes"
   CP="$AJAR:$STDLIB:$ENG_JAR:$DEPS/core-1.1.2.jar:$DEPS/freereflection-classes.jar:$DEPS/annotation-1.1.0.jar:$DEPS/androidx-core-classes.jar"
   # shellcheck disable=SC2046
-  "$KOTLINC" $(find "$WS/kotlin" "$MB/gen" -name "*.kt") "$MB/gen-engine/top/niunaijun/blackbox/R.java" \
+  "$KOTLINC" $(find "$WS/kotlin" "$MB/gen" -name "*.kt") \
+    $(find "$MB/gen" -name "*.java") \
+    "$MB/gen-engine/top/niunaijun/blackbox/R.java" \
     -no-stdlib -no-reflect \
     -cp "$CP" \
     -d "$MB/classes" -jvm-target 17 -nowarn
