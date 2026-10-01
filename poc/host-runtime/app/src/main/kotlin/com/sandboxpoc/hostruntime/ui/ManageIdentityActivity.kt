@@ -23,8 +23,6 @@ class ManageIdentityActivity : Activity() {
     private lateinit var app: SandboxApp
     /** Cached guest package list; null while a background load is in flight. */
     private var guests: List<String>? = null
-    /** Cached GMS state; null while a background load is in flight. */
-    private var gmsInstalled: Boolean? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -34,20 +32,17 @@ class ManageIdentityActivity : Activity() {
     override fun onResume() {
         super.onResume()
         guests = null
-        gmsInstalled = null
         render()
         loadGuests()
     }
 
-    /** Loads the guest package list and GMS state off the main thread, then re-renders. */
+    /** Loads the guest package list off the main thread, then re-renders. */
     private fun loadGuests() {
         val bb = app.runtime as? BlackBoxRuntime ?: return
         Thread {
             val list = runCatching { bb.installedGuestPackages() }.getOrElse { emptyList() }
-            val gms = runCatching { bb.isGmsInstalled() }.getOrNull()
             runOnUiThread {
                 guests = list
-                gmsInstalled = gms
                 render()
             }
         }.start()
@@ -101,25 +96,6 @@ class ManageIdentityActivity : Activity() {
             root.addView(Ui.row(this, "• ${cap.displayName}: ${cap.state}"))
         }
 
-        root.addView(Ui.section(this, "Google Play Services"))
-        when (gmsInstalled) {
-            null -> root.addView(Ui.row(this, "Checking…"))
-            true -> root.addView(Ui.row(this, "Installed in this identity."))
-            false -> {
-                root.addView(Ui.row(this, "Not installed — guests that require Play " +
-                    "Services (e.g. Wakie) will refuse to connect."))
-                root.addView(Ui.button(this, "Install Google Play Services") {
-                    Ui.bg(this, work = {
-                        (app.runtime as? BlackBoxRuntime)?.installGoogleServices()
-                            ?: "FAIL: runtime is not BlackBox-backed"
-                    }, onDone = {
-                        gmsInstalled = null
-                        loadGuests()
-                    })
-                })
-            }
-        }
-
         root.addView(Ui.section(this, "Guest applications"))
         root.addView(Ui.button(this, "Clone Application…") {
             startActivity(Intent(this, AppPickerActivity::class.java))
@@ -129,21 +105,26 @@ class ManageIdentityActivity : Activity() {
             val guestList = guests
             val labels = app.storage.guestLabels(identity.id)
             if (guestList == null) {
-                root.addView(Ui.row(this, "Loading guest apps…"))
-            } else if (guestList.isEmpty()) {
-                root.addView(Ui.row(this, "No guest apps installed in the virtual user."))
+                root.addView(Ui.row(this, "Loading cloned apps…"))
             } else {
-                guestList.forEach { pkg ->
-                    root.addView(Ui.row(this, labels[pkg] ?: pkg))
-                    root.addView(Ui.button(this, "Launch") {
-                        launchGuestWithProfile(pkg)
-                    })
-                    root.addView(Ui.button(this, "Uninstall") {
-                        Ui.bg(this, work = {
-                            app.runtime.uninstallApplication(pkg)
-                            "OK: uninstalled $pkg"
-                        }, onDone = { guests = null; loadGuests() })
-                    })
+                // Only the apps the user cloned — the engine's Google Play
+                // Services clones are hidden here (see Settings → Advanced).
+                val userGuests = guestList.filter { !bb.isGmsPackage(it) }
+                if (userGuests.isEmpty()) {
+                    root.addView(Ui.row(this, "No apps cloned in this identity."))
+                } else {
+                    userGuests.forEach { pkg ->
+                        root.addView(Ui.row(this, labels[pkg] ?: pkg))
+                        root.addView(Ui.button(this, "Launch") {
+                            launchGuestWithProfile(pkg)
+                        })
+                        root.addView(Ui.button(this, "Uninstall") {
+                            Ui.bg(this, work = {
+                                app.runtime.uninstallApplication(pkg)
+                                "OK: uninstalled $pkg"
+                            }, onDone = { guests = null; loadGuests() })
+                        })
+                    }
                 }
             }
             root.addView(Ui.divider(this))

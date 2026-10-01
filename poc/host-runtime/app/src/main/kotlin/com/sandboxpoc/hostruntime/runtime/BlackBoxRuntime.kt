@@ -3,6 +3,7 @@ package com.sandboxpoc.hostruntime.runtime
 import android.os.Looper
 import android.util.Log
 import top.niunaijun.blackbox.BlackBoxCore
+import top.niunaijun.blackbox.core.GmsCore
 import top.niunaijun.blackbox.core.env.BEnvironment
 import top.niunaijun.blackbox.core.system.user.BUserManagerService
 import java.io.File
@@ -67,6 +68,14 @@ class BlackBoxRuntime : SandboxRuntime {
         checkBackground()
         return core().isInstallGms(VIRTUAL_USER_ID)
     }
+
+    /**
+     * Whether this package is one of the engine's Google Play Services
+     * clones rather than a user-cloned app. Pure static check — no IPC.
+     * UI helper so Manage Identity shows only the apps the user cloned.
+     */
+    fun isGmsPackage(packageName: String): Boolean =
+        GmsCore.isGoogleAppOrService(packageName)
 
     /**
      * Clones the host's real Google Play Services packages

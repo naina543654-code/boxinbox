@@ -5,20 +5,37 @@ import android.os.Bundle
 import com.sandboxpoc.hostruntime.SandboxApp
 import com.sandboxpoc.hostruntime.capability.CapabilityManager
 import com.sandboxpoc.hostruntime.providers.ProviderBindings
+import com.sandboxpoc.hostruntime.runtime.BlackBoxRuntime
 
 class SettingsActivity : Activity() {
 
     private lateinit var app: SandboxApp
+    /** Cached GMS state; null while a background load is in flight. */
+    private var gmsInstalled: Boolean? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         app = application as SandboxApp
-        render()
     }
 
     override fun onResume() {
         super.onResume()
+        gmsInstalled = null
         render()
+        loadGms()
+    }
+
+    /** Loads the GMS install state off the main thread, then re-renders. */
+    private fun loadGms() {
+        val bb = app.runtime as? BlackBoxRuntime ?: return
+        if (app.identities.activeIdentity() == null) return
+        Thread {
+            val gms = runCatching { bb.isGmsInstalled() }.getOrNull()
+            runOnUiThread {
+                gmsInstalled = gms
+                render()
+            }
+        }.start()
     }
 
     private fun render() {
@@ -53,6 +70,29 @@ class SettingsActivity : Activity() {
         root.addView(Ui.row(this, "Sandbox root:"))
         root.addView(Ui.mono(this, app.storage.sandboxRoot().absolutePath))
         root.addView(Ui.row(this, "Host private data is never copied into the sandbox."))
+
+        root.addView(Ui.section(this, "Google Play Services"))
+        val bb = app.runtime as? BlackBoxRuntime
+        when {
+            bb == null -> root.addView(Ui.row(this, "Not available with this runtime."))
+            app.identities.activeIdentity() == null ->
+                root.addView(Ui.row(this, "No active identity."))
+            gmsInstalled == null -> root.addView(Ui.row(this, "Checking…"))
+            gmsInstalled == true ->
+                root.addView(Ui.row(this, "Installed in this identity."))
+            else -> {
+                root.addView(Ui.row(this, "Not installed — guests that require Play " +
+                    "Services (e.g. Wakie) will refuse to connect."))
+                root.addView(Ui.button(this, "Install Google Play Services") {
+                    Ui.bg(this, work = {
+                        bb.installGoogleServices()
+                    }, onDone = {
+                        gmsInstalled = null
+                        loadGms()
+                    })
+                })
+            }
+        }
 
         root.addView(Ui.section(this, "Event log (identity/runtime transitions)"))
         val lines = app.log.recent()
