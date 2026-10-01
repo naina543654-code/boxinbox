@@ -440,17 +440,17 @@ object ProfileGenerator {
             "samsung" -> SensorVendorStrings(
                 accelVendor = "STMicroelectronics", accelName = "LSM6DSO Accelerometer",
                 gyroVendor = "STMicroelectronics", gyroName = "LSM6DSO Gyroscope",
-                magVendor = "Asahi Kasei", magName = "AK09918C Magnetometer",
+                magVendor = "AKM", magName = "AK09918C Magnetometer",
             )
             "google" -> SensorVendorStrings(
                 accelVendor = "Google Inc.", accelName = "BMI323 Accelerometer",
                 gyroVendor = "Google Inc.", gyroName = "BMI323 Gyroscope",
-                magVendor = "Asahi Kasei", magName = "AK09918 Magnetometer",
+                magVendor = "AKM", magName = "AK09918 Magnetometer",
             )
             else -> SensorVendorStrings(
-                accelVendor = "Bosch", accelName = "BMI260 Accelerometer",
-                gyroVendor = "Bosch", gyroName = "BMI260 Gyroscope",
-                magVendor = "Bosch", magName = "BMM150 Magnetometer",
+                accelVendor = "BOSCH", accelName = "BMI260 Accelerometer",
+                gyroVendor = "BOSCH", gyroName = "BMI260 Gyroscope",
+                magVendor = "BOSCH", magName = "BMM150 Magnetometer",
             )
         }
 
