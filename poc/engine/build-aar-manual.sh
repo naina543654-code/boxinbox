@@ -107,11 +107,11 @@ s_res() {  # aapt2 compile engine res (+appcompat, needed by LauncherTheme) -> R
     --output-text-symbols "$WORK/R.txt" \
     --min-sdk-version 21 --target-sdk-version 30 \
     $(find "$WORK/flat" -name "*.flat")
-  # De-finalize R fields (like AGP does for libraries): the AAR's classes.jar must reference
-  # R fields (getstatic), not inline final constants, so a consuming app build (which re-links
-  # resources and reassigns IDs) resolves the correct IDs at runtime. Verified: no switch(R)
-  # or annotation usage of R in the engine sources.
-  find "$WORK/gen-r" -name "R.java" -exec sed -i 's/public static final int/public static int/g' {} +
+  # NOTE: R.java is intentionally NOT compiled into classes.jar. A standard AGP-built
+  # AAR never ships R classes — the consuming app build regenerates them from R.txt +
+  # res/. Shipping them caused Gradle's AarToClassTransform to fail with
+  # "already contains entry 'top/niunaijun/blackbox/R$anim.class', cannot overwrite".
+  # (Verified: no switch(R) or annotation usage of R in the engine sources.)
   echo "RES_OK: $(find "$WORK/gen-r" -name 'R.java')"
 }
 
@@ -124,7 +124,7 @@ s_javac() {  # compile all engine java (1.8) -> engine-classes.jar
        "$ENGINE/Bcore/pine-xposed/src/main/java" \
        "$ENGINE/Bcore/pine-xposed/src/main/apacheCommonsLang" \
        "$ENGINE/android-mirror/src/main/java" \
-       "$WORK/aidl-gen" "$WORK/gen-r" \
+       "$WORK/aidl-gen" \
        -name "*.java" > "$WORK/sources.list"
   wc -l "$WORK/sources.list"
   CP="$A30:$DEPS/core-1.1.2.jar:$DEPS/freereflection-classes.jar:$DEPS/annotation-1.1.0.jar:$DEPS/androidx-core-classes.jar"

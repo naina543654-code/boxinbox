@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.sandboxpoc.hostruntime">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- App picker needs visibility of launchable apps. The <queries> element
          covers this on API 30+ without QUERY_ALL_PACKAGES. The future engine
