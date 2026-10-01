@@ -188,12 +188,14 @@ class BlackBoxRuntime : SandboxRuntime {
         }
     }
 
-    override fun uninstallApplication(packageName: String) = attempt("uninstall") {
-        // Before/after logging: if the "calling" line appears in logcat
-        // without the "returned" line, the engine call is stuck (not failed).
-        Log.i(TAG_WIPE, "uninstall: calling uninstallPackageAsUser($packageName, $VIRTUAL_USER_ID)")
-        core().uninstallPackageAsUser(packageName, VIRTUAL_USER_ID)
-        Log.i(TAG_WIPE, "uninstall: uninstallPackageAsUser($packageName) returned")
+    override fun uninstallApplication(packageName: String) {
+        attempt("uninstall") {
+            // Before/after logging: if the "calling" line appears in logcat
+            // without the "returned" line, the engine call is stuck (not failed).
+            Log.i(TAG_WIPE, "uninstall: calling uninstallPackageAsUser($packageName, $VIRTUAL_USER_ID)")
+            core().uninstallPackageAsUser(packageName, VIRTUAL_USER_ID)
+            Log.i(TAG_WIPE, "uninstall: uninstallPackageAsUser($packageName) returned")
+        }
     }
 
     override fun launchApplication(packageName: String) = attempt("launch") {
