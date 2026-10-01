@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Guest apps run inside this host's process, so the host must hold the
+         network permissions itself: Android enforces INTERNET at the kernel
+         level via the inet group, granted from the HOST manifest. Without
+         this, every guest app is offline (sockets get EACCES). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <!-- App picker needs visibility of launchable apps. The <queries> element
          covers this on API 30+ without QUERY_ALL_PACKAGES. The future engine
          adapter may require additional permissions — see INTEGRATION.md. -->
