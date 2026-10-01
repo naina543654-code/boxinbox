@@ -127,27 +127,22 @@ class ManageIdentityActivity : Activity() {
         val bb = app.runtime as? BlackBoxRuntime
         if (bb != null) {
             val guestList = guests
+            val labels = app.storage.guestLabels(identity.id)
             if (guestList == null) {
                 root.addView(Ui.row(this, "Loading guest apps…"))
             } else if (guestList.isEmpty()) {
                 root.addView(Ui.row(this, "No guest apps installed in the virtual user."))
             } else {
                 guestList.forEach { pkg ->
-                    root.addView(Ui.row(this, "guest: $pkg"))
-                    root.addView(Ui.button(this, "Launch $pkg") {
+                    root.addView(Ui.row(this, labels[pkg] ?: pkg))
+                    root.addView(Ui.button(this, "Launch") {
                         launchGuestWithProfile(pkg)
                     })
-                    root.addView(Ui.button(this, "Stop $pkg") {
-                        Ui.bg(this, work = {
-                            app.runtime.stopApplication(pkg)
-                            "OK: stopped $pkg"
-                        })
-                    })
-                    root.addView(Ui.button(this, "Uninstall $pkg") {
+                    root.addView(Ui.button(this, "Uninstall") {
                         Ui.bg(this, work = {
                             app.runtime.uninstallApplication(pkg)
                             "OK: uninstalled $pkg"
-                        }, onDone = { render() })
+                        }, onDone = { guests = null; loadGuests() })
                     })
                 }
             }

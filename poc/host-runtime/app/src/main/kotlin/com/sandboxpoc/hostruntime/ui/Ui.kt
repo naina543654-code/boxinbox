@@ -3,9 +3,11 @@ package com.sandboxpoc.hostruntime.ui
 import android.app.Activity
 import android.content.Context
 import android.graphics.Typeface
+import android.text.InputType
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -85,6 +87,18 @@ object Ui {
                 LinearLayout.LayoutParams.WRAP_CONTENT)
             lp.topMargin = dp(context, 6)
             layoutParams = lp
+        }
+
+    fun searchField(context: Context, hint: String): EditText =
+        EditText(context).apply {
+            this.hint = hint
+            inputType = InputType.TYPE_CLASS_TEXT
+            setSingleLine()
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(context, 4); bottomMargin = dp(context, 4)
+            }
         }
 
     fun divider(context: Context): View =

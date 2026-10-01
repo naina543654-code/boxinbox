@@ -205,36 +205,96 @@ class BlackBoxRuntime : SandboxRuntime {
      * Fully remove the virtual user and everything in it.
      *
      * Bug history: this used to be `runCatching { deleteUser(..) }` — any
-     * failure (engine hiccup, files locked by a still-running guest) was
-     * silently swallowed while the app reported "identity deleted". The next
-     * identity then reused the never-deleted virtual user, so old cloned apps
-     * and their data survived the delete. Failures are now surfaced, and the
-     * wipe is verified instead of assumed.
+     * failure was silently swallowed while the app reported "identity
+     * deleted", and the next identity reused the never-deleted virtual
+     * user, keeping old cloned apps and their data. Two further traps:
+     * the engine's own deleteUser iterates packages in one unguarded loop
+     * (a single bad package aborts the whole wipe), and
+     * getInstalledPackages hides GMS clones, so "uninstall everything
+     * listed" misses them.
+     *
+     * This wipe therefore trusts nothing: per-package uninstalls are
+     * isolated, GMS goes through the engine's own uninstaller, every
+     * on-disk location is force-cleared, and the result is VERIFIED.
+     * Anything surviving is reported by name instead of silently kept.
      */
     private fun wipeVirtualUser() {
-        // 1. Best-effort: stop running guests so open files don't block deletion.
-        val installed = runCatching { installedGuestPackages() }.getOrDefault(emptyList())
-        for (pkg in installed) {
+        // Anomalies seen along the way (diagnostic context only).
+        val issues = mutableListOf<String>()
+
+        // Packages from the engine list (GMS-filtered) plus every on-disk
+        // app dir (covers GMS clones and partial installs the list hides).
+        val pkgs = mutableSetOf<String>()
+        runCatching { installedGuestPackages() }.onSuccess { pkgs += it }
+        runCatching {
+            BEnvironment.getAppRootDir()
+                .listFiles { f -> f.isDirectory }
+                ?.forEach { pkgs += it.name }
+        }
+
+        // 1. Stop running guests so open files don't block deletion.
+        for (pkg in pkgs) {
             runCatching { core().stopPackage(pkg, VIRTUAL_USER_ID) }
         }
-        // 2. Best-effort: uninstall every cloned package (removes APK code
-        //    dirs and per-user data, including GMS clones).
-        for (pkg in runCatching { installedGuestPackages() }.getOrDefault(emptyList())) {
+
+        // 2. GMS via the engine's own uninstaller (invisible to the list above).
+        runCatching {
+            if (!core().uninstallGms(VIRTUAL_USER_ID)) {
+                issues += "GMS uninstall reported incomplete"
+            }
+        }.onFailure { issues += "GMS uninstall threw: ${it.message}" }
+
+        // 3. Uninstall every remaining package in isolation — one bad
+        //    package must not abort the wipe of the others.
+        for (pkg in pkgs) {
             runCatching { core().uninstallPackageAsUser(pkg, VIRTUAL_USER_ID) }
+                .onFailure { issues += "uninstall $pkg threw: ${it.message}" }
         }
-        // 3. Delete the virtual user itself. Deliberately NOT swallowed: if
-        //    this throws, the identity must not be reported as deleted.
-        users().deleteUser(VIRTUAL_USER_ID)
-        // 4. Verify the engine actually wiped the dirs; force-remove leftovers.
-        val userDir = BEnvironment.getUserDir(VIRTUAL_USER_ID)
-        if (userDir.exists()) {
-            userDir.deleteRecursively()
-            check(!userDir.exists()) { "virtual user dir survived deletion: $userDir" }
+
+        // 4. Drop the virtual user via the engine. Best-effort: step 5 does
+        //    not depend on this succeeding.
+        runCatching { users().deleteUser(VIRTUAL_USER_ID) }
+            .onFailure { issues += "engine deleteUser threw: ${it.message}" }
+
+        // 5. Scorched earth: force-remove every on-disk location that can
+        //    hold user-0 state — including ones the engine only reaches via
+        //    its per-package loop (data/user_de/0, data/app/<pkg>,
+        //    hotfix/u0). Survivors are fatal.
+        val dirs = mutableListOf(
+            BEnvironment.getUserDir(VIRTUAL_USER_ID),
+            File(BEnvironment.getVirtualRoot(), "data/user_de/$VIRTUAL_USER_ID"),
+            BEnvironment.getExternalUserDir(VIRTUAL_USER_ID),
+            BEnvironment.getHotfixDir(VIRTUAL_USER_ID),
+        )
+        pkgs.forEach { dirs += BEnvironment.getAppDir(it) }
+        val dirSurvivors = mutableListOf<String>()
+        for (d in dirs.distinct()) {
+            if (!d.exists()) continue
+            d.deleteRecursively()
+            if (d.exists()) dirSurvivors += d.absolutePath
         }
-        val extDir = BEnvironment.getExternalUserDir(VIRTUAL_USER_ID)
-        if (extDir.exists()) {
-            extDir.deleteRecursively()
-            check(!extDir.exists()) { "virtual external dir survived deletion: $extDir" }
+
+        // 6. In-memory verification: nothing still registered for user 0.
+        //    Survivors are fatal; the lists above are only context.
+        val stillRegistered = runCatching { installedGuestPackages() }
+            .getOrDefault(emptyList())
+        val gmsLeft = runCatching { core().isInstallGms(VIRTUAL_USER_ID) }
+            .getOrDefault(false)
+
+        check(dirSurvivors.isEmpty() && stillRegistered.isEmpty() && !gmsLeft) {
+            buildString {
+                append("identity wipe incomplete")
+                if (dirSurvivors.isNotEmpty()) {
+                    append("; dirs survived: ${dirSurvivors.joinToString(",")}")
+                }
+                if (stillRegistered.isNotEmpty()) {
+                    append("; still registered: ${stillRegistered.joinToString(",")}")
+                }
+                if (gmsLeft) append("; GMS still registered")
+                if (issues.isNotEmpty()) {
+                    append(" [warnings: ${issues.joinToString("; ")}]")
+                }
+            }.toString()
         }
     }
 

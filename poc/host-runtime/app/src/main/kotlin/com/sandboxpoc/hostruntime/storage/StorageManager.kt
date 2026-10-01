@@ -89,6 +89,32 @@ class StorageManager(context: Context) {
     }
 
     // ------------------------------------------------------------------
+    // Guest display names (packageName -> label), UI convenience only
+    // ------------------------------------------------------------------
+
+    /**
+     * Remember the host-side display label for a cloned guest, so the UI
+     * can show application names instead of package names. Lives under
+     * sandbox/<identityId>/, so it is wiped with the identity.
+     */
+    fun saveGuestLabel(identityId: String, packageName: String, label: String) {
+        val labels = guestLabels(identityId).toMutableMap()
+        labels[packageName] = label
+        File(guestStateRoot(identityId), "guest_labels.json")
+            .writeText(JSONObject(labels as Map<*, *>).toString(2))
+    }
+
+    /** Display labels recorded for cloned guests; empty when none. */
+    fun guestLabels(identityId: String): Map<String, String> {
+        val f = File(File(sandboxRoot, identityId), "guest_labels.json")
+        if (!f.isFile) return emptyMap()
+        return runCatching {
+            val o = JSONObject(f.readText())
+            o.keys().asSequence().associateWith { o.getString(it) }
+        }.getOrDefault(emptyMap())
+    }
+
+    // ------------------------------------------------------------------
     // Lifecycle log
     // ------------------------------------------------------------------
 
