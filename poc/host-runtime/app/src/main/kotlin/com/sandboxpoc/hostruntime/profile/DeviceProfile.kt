@@ -1,6 +1,52 @@
 package com.sandboxpoc.hostruntime.profile
 
 /**
+ * Derives the build incremental from a fingerprint of the form
+ * `<brand>/<product>/<device>:<version>/<buildId>/<incremental>:<type>/<tags>`.
+ * Returns "" when the fingerprint does not have the expected shape.
+ */
+internal fun deriveIncremental(fingerprint: String): String {
+    val segs = fingerprint.split('/')
+    if (segs.size < 5) return ""
+    return segs[4].substringBefore(':')
+}
+
+/**
+ * Derives a plausible `ro.build.display.id` (Build.DISPLAY) from the row's
+ * brand, build ID and incremental.
+ *
+ * Verified OEM patterns: Samsung reports `<buildId>.<incremental>`
+ * (e.g. `TP1A.220624.014.A346BXXU1AWB9`); Pixel reports the build ID itself;
+ * Xiaomi/Redmi/POCO report the MIUI version (= incremental, e.g.
+ * `V816.0.15.0.UNRMIXM`); Motorola reports the full version string
+ * (= incremental). For other brands (OnePlus/OPPO/realme/Nothing) the exact
+ * OEM display.id pattern is not verified per row, so we fall back to the
+ * build ID — always coherent (it is a substring of the fingerprint) rather
+ * than leaking the host's real display string.
+ */
+internal fun deriveDisplayId(brand: String, buildId: String, incremental: String): String =
+    when (brand.lowercase()) {
+        "samsung" -> "$buildId.$incremental"
+        "google" -> buildId
+        "xiaomi", "redmi", "poco" -> incremental.ifEmpty { buildId }
+        "motorola" -> incremental.ifEmpty { buildId }
+        else -> buildId
+    }
+
+/**
+ * Plausible kernel version (`os.version` / `System.getProperty("os.version")`)
+ * per API level. Synthetic but shape-real: real Android 13 devices ship
+ * 5.10/5.15 kernels, Android 14 devices 5.15/6.1. The exact build hash is not
+ * per-device verified — the goal is to stop leaking the host's real kernel
+ * (e.g. a 4.19 Lineage kernel on an API-33 identity), not to impersonate one
+ * specific device's kernel build.
+ */
+internal fun kernelForApi(apiLevel: Int): String = when (apiLevel) {
+    34 -> "6.1.25-android14-4-00001-g3f2e1d0c9b8a"
+    else -> "5.10.107-android13-4-00001-g7a6b5c4d3e2f"
+}
+
+/**
  * Spoofed device profile for one virtual identity. `extras` is an extensible
  * map for future engine-specific fields (serial, IMEI-shaped values, MAC,
  * telephony props, …). The core fields mirror android.os.Build so an engine
@@ -966,6 +1012,12 @@ data class SpoofProfile(
         val androidVersion: String,
         val apiLevel: Int,
         val securityPatch: String,
+        /** Build.DISPLAY — derived per-OEM pattern, see [deriveDisplayId]. */
+        val displayId: String,
+        /** Build.VERSION.INCREMENTAL — parsed from [fingerprint]. */
+        val buildIncremental: String,
+        /** Plausible kernel for `System.getProperty("os.version")`. */
+        val kernelVersion: String,
     )
 
     data class Movement(
@@ -1028,7 +1080,10 @@ data class SpoofProfile(
         jname("buildType"); append(':'); jstr(device.buildType); append(',')
         jname("androidVersion"); append(':'); jstr(device.androidVersion); append(',')
         jname("apiLevel"); append(':'); append(device.apiLevel); append(',')
-        jname("securityPatch"); append(':'); jstr(device.securityPatch)
+        jname("securityPatch"); append(':'); jstr(device.securityPatch); append(',')
+        jname("displayId"); append(':'); jstr(device.displayId); append(',')
+        jname("buildIncremental"); append(':'); jstr(device.buildIncremental); append(',')
+        jname("kernelVersion"); append(':'); jstr(device.kernelVersion)
         append("},")
         jname("androidId"); append(':'); jstr(androidId); append(',')
         append("\"location\":{")
@@ -1112,22 +1167,41 @@ data class SpoofProfile(
             return SpoofProfile(
                 profileId = getStr(root, "profileId"),
                 generatedAt = getLong(root, "generatedAt"),
-                device = DeviceInfo(
+                device = run {
+                    val fingerprint = getStr(d, "fingerprint")
+                    val buildId = getStr(d, "buildId")
+                    val brand = getStr(d, "brand")
+                    val apiLevel = getInt(d, "apiLevel")
+                    val incremental = (d["buildIncremental"] as? String)
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: deriveIncremental(fingerprint)
+                    DeviceInfo(
                     manufacturer = getStr(d, "manufacturer"),
-                    brand = getStr(d, "brand"),
+                    brand = brand,
                     model = getStr(d, "model"),
                     device = getStr(d, "device"),
                     product = getStr(d, "product"),
                     board = getStr(d, "board"),
                     hardware = getStr(d, "hardware"),
-                    fingerprint = getStr(d, "fingerprint"),
-                    buildId = getStr(d, "buildId"),
+                    fingerprint = fingerprint,
+                    buildId = buildId,
                     buildTags = getStr(d, "buildTags"),
                     buildType = getStr(d, "buildType"),
                     androidVersion = getStr(d, "androidVersion"),
-                    apiLevel = getInt(d, "apiLevel"),
+                    apiLevel = apiLevel,
                     securityPatch = getStr(d, "securityPatch"),
-                ),
+                    // Tolerant: profiles persisted before 2026-10-02 lack
+                    // these fields — derive the same values ProfileGenerator
+                    // would have written.
+                    displayId = (d["displayId"] as? String)
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: deriveDisplayId(brand, buildId, incremental),
+                    buildIncremental = incremental,
+                    kernelVersion = (d["kernelVersion"] as? String)
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: kernelForApi(apiLevel),
+                    )
+                },
                 androidId = getStr(root, "androidId"),
                 location = LocationInfo(
                     latitude = getDouble(l, "latitude"),

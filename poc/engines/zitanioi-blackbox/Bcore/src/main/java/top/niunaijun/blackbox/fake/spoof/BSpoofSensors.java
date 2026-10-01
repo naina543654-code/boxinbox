@@ -29,6 +29,11 @@ import top.niunaijun.blackbox.utils.Slog;
  * no public constructor and synthesising one via {@code Parcel} would be
  * version-fragile — so filtering operates on the real sensor objects.
  *
+ * <p>SPOOFED: {@code Sensor.getVendor()} / {@code getName()} return the
+ * profile's per-manufacturer plausible strings (e.g. "STMicroelectronics" /
+ * "LSM6DSO Accelerometer" for Samsung rows) instead of the host's real
+ * hardware identifiers (bmi3x0/BOSCH, ak0991x/akm, eminent, qualcomm).
+ *
  * <p>NOT IMPLEMENTED (stretch goal, see class javadoc note): synthetic live
  * readings via {@code registerListener} interception. Delivering fake
  * {@code SensorEvent}s would require constructing {@code SensorEvent} (no
@@ -65,6 +70,7 @@ public class BSpoofSensors {
             try {
                 hookGetSensorList();
                 hookGetDefaultSensor();
+                hookSensorIdentity();
                 sInstalled = true;
                 Slog.d(TAG, "sensor visibility hooks installed");
             } catch (Throwable t) {
@@ -145,6 +151,58 @@ public class BSpoofSensors {
                 }
             }
         };
+    }
+
+    /**
+     * Hooks {@code Sensor.getVendor()} and {@code Sensor.getName()} so guests
+     * see the profile's plausible vendor/name strings (per manufacturer)
+     * instead of the host's real sensor hardware identifiers (bmi3x0/BOSCH,
+     * ak0991x/akm, eminent, qualcomm, ...). Fail-open: any failure or an
+     * inactive/absent profile entry leaves the real strings untouched.
+     *
+     * <p>Recursion note: the hook body calls {@code Sensor.getType()} on the
+     * receiver — a different, unhooked method — so there is no re-entry.
+     */
+    private static void hookSensorIdentity() {
+        hookSensorStringMethod("getVendor", true);
+        hookSensorStringMethod("getName", false);
+    }
+
+    private static void hookSensorStringMethod(String methodName, final boolean isVendor) {
+        final Method target;
+        try {
+            target = Sensor.class.getDeclaredMethod(methodName);
+        } catch (Throwable t) {
+            Slog.e(TAG, "Sensor." + methodName + "() not found; skipping", t);
+            return;
+        }
+        try {
+            Pine.hook(target, new MethodHook() {
+                @Override
+                public void afterCall(Pine.CallFrame callFrame) throws Throwable {
+                    if (callFrame.hasThrowable()) {
+                        return;
+                    }
+                    Object recv = callFrame.thisObject;
+                    if (!(recv instanceof Sensor)) {
+                        return;
+                    }
+                    BSpoofManager spoof = BSpoofManager.get();
+                    if (spoof == null || !spoof.isSpoofActive()) {
+                        return;
+                    }
+                    int type = ((Sensor) recv).getType();
+                    String spoofed = isVendor
+                            ? spoof.getSensorVendor(type)
+                            : spoof.getSensorName(type);
+                    if (spoofed != null) {
+                        callFrame.setResult(spoofed);
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            Slog.e(TAG, "Pine hook on Sensor." + methodName + " failed", t);
+        }
     }
 
     /**

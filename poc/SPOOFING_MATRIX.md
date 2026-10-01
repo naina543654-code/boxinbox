@@ -37,6 +37,11 @@ never told a host value is virtual.
 | Feature | State | Enforcement path | Probe verification | Device test |
 |---|---|---|---|---|
 | `Build` fields (MANUFACTURER, BRAND, MODEL, DEVICE, PRODUCT, FINGERPRINT, ID, TAGS, TYPE, BOARD, HARDWARE) | Supported | `fake/spoof/BSpoofManager.applyBuildSpoofing()` — reflection strips `final` on the statics, called at the top of `HookManager.init()` (earliest per-process point, guest processes only) | ProbeV2 Build rows compare against profile `device.*` | PASS on all 11 rows on-device |
+| `Build.DISPLAY` | Supported | Same path — profile `device.displayId`, derived per OEM: Samsung `<buildId>.<incremental>`, Pixel = buildId, Xiaomi/Redmi/POCO/Motorola = incremental, others = buildId (coherent fallback, never the host's Lineage string) | ProbeV2 `Build.DISPLAY` row | Must PASS; previously leaked `lineage_rhode-userdebug ...` |
+| `Build.VERSION.INCREMENTAL` | Supported | Same path — profile `device.buildIncremental`, parsed from the fingerprint's incremental segment (coherent by construction) | ProbeV2 `Build.VERSION.INCREMENTAL` row | Must PASS |
+| `Build.VERSION.SECURITY_PATCH` | Partially Supported | Same path — profile `device.securityPatch` (researched per row). Rows with `"unknown"` patch are NOT spoofed (engine skips; never fabricates a date) | ProbeV2 row; UNKNOWN for `unknown` rows | PASS on rows with a researched date |
+| `System.getProperty("os.version")` (kernel) | Experimental | `fake/spoof/BSpoofJvmProps` — Pine hooks on `System.getProperty(String[, String])` rewriting only the `os.version` key to the profile's per-API plausible kernel (5.10.x for API 33, 6.1.x for API 34). Recursion-safe: the hook body never calls `getProperty` (profile loads via `applicationInfo.dataDir` field read). Fail-open | ProbeV2 `os.version(kernel)` row | Must PASS; previously leaked host kernel `4.19.304-perf+` |
+| Sensor vendor/name (`Sensor.getVendor()`, `getName()`) | Experimental | `fake/spoof/BSpoofSensors.hookSensorIdentity()` — Pine hooks returning the profile's per-manufacturer plausible strings (e.g. STMicroelectronics/LSM6DSO for Samsung) instead of host hardware IDs (bmi3x0/BOSCH, ak0991x/akm, eminent, qualcomm). Same fail-open Pine mechanism as the visibility filter | ProbeV2 `sensor[<type>].vendor` / `.name` rows per expected sensor | Must PASS |
 | `Build.VERSION.RELEASE` / `SDK_INT` | Host Provided | Deliberately NOT spoofed — these drive the real in-process framework; spoofing them destabilizes the runtime | ProbeV2 reports them as INFO, never PASS/FAIL | n/a |
 | `Build.getSerial()` | Partially Supported | Static-field patch covers the Java field; the native `ro.serialno` read path is untouched | ProbeV2 does not assert serial | Note serial behavior on-device |
 | Android ID (`Settings.Secure.ANDROID_ID`) | Supported | `fake/service/context/providers/SystemProviderStub.trySpoofAndroidId()` — intercepts `query()` (NameValueCache path) and `call()` (GET_secure path) for `android_id`, returns a one-row cursor / Bundle with the profile value | ProbeV2 ANDROID_ID row | Must PASS; compare with standalone probe (host value) |
@@ -57,8 +62,9 @@ never told a host value is virtual.
 
 - Full 13-module V1 app, multi-identity, UI polish — gated on the runtime
   verdict and Jason's approval.
-- `Build.VERSION.*` spoofing, `Build.getSerial()` native path, synthetic
-  sensor readings, VPN network mode — documented above.
+- `Build.VERSION.RELEASE`/`SDK_INT` spoofing (would destabilize the guest),
+  `Build.getSerial()` native path, synthetic sensor readings, VPN network
+  mode — documented above.
 - Undetectability claims: the probe measures guest-observed values;
   configuration alone is not proof, and no complete anti-detection is promised.
 

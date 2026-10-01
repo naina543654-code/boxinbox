@@ -4,6 +4,9 @@ import android.os.Build
 import android.telephony.TelephonyManager
 import com.sandboxpoc.hostruntime.profile.DeviceProfile
 import com.sandboxpoc.hostruntime.profile.SpoofProfile
+import com.sandboxpoc.hostruntime.profile.deriveDisplayId
+import com.sandboxpoc.hostruntime.profile.deriveIncremental
+import com.sandboxpoc.hostruntime.profile.kernelForApi
 import java.security.SecureRandom
 import java.util.UUID
 
@@ -274,6 +277,7 @@ object ProfileGenerator {
         val city = CITIES[random.nextInt(CITIES.size)]
         val operators = CARRIERS[city.countryIso] ?: CARRIERS.getValue("us")
         val operator = operators[random.nextInt(operators.size)]
+        val incremental = deriveIncremental(row.fingerprint)
         val device = SpoofProfile.DeviceInfo(
             manufacturer = row.manufacturer,
             brand = row.brand,
@@ -289,6 +293,9 @@ object ProfileGenerator {
             androidVersion = row.androidVersion,
             apiLevel = row.apiLevel,
             securityPatch = row.securityPatch,
+            displayId = deriveDisplayId(row.brand, row.buildId, incremental),
+            buildIncremental = incremental,
+            kernelVersion = kernelForApi(row.apiLevel),
         )
         return SpoofProfile(
             profileId = profileId,

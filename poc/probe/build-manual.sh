@@ -43,12 +43,16 @@ for a in play-services-base-18.5.0 play-services-basement-18.4.0 play-services-t
   CP="$CP:$GMS/$a/classes.jar"
 done
 
-# --- 1. aapt2 link (manifest -> base APK) ---
+# --- 1. aapt2 link (manifest + app res -> base APK) ---
 # aapt2 requires the package attribute; AGP injects it from `namespace`,
 # so we inject it into a throwaway copy (source manifest stays Gradle-clean).
 sed 's|<manifest xmlns:android="http://schemas.android.com/apk/res/android">|<manifest xmlns:android="http://schemas.android.com/apk/res/android"\n    package="com.sandboxpoc.probe">|' \
   "$PROBE/app/src/main/AndroidManifest.xml" > "$W/AndroidManifest.xml"
+# Compile the app's own res/ (mipmap/ic_launcher etc.) — without this the
+# link step fails with "resource mipmap/ic_launcher not found".
+"$BT/aapt2" compile --dir "$PROBE/app/src/main/res" -o "$W/probe-res.zip"
 "$BT/aapt2" link -o "$W/base.apk" -I "$PLATFORM" \
+  -R "$W/probe-res.zip" \
   --manifest "$W/AndroidManifest.xml" \
   --min-sdk-version 33 --target-sdk-version 35 \
   --version-code 1 --version-name 1.0

@@ -49,8 +49,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -689,6 +691,7 @@ public class MainActivity extends Activity {
         cmpAndroidId();
         cmpLocation();
         cmpSensors();
+        cmpSensorIdentity();
         cmpWifi();
         cmpTelephony();
         cmpPackages();
@@ -802,6 +805,7 @@ public class MainActivity extends Activity {
         cmpString("Build.TYPE", opt(dev, "buildType"), Build.TYPE);
         cmpString("Build.BOARD", opt(dev, "board"), Build.BOARD);
         cmpString("Build.HARDWARE", opt(dev, "hardware"), Build.HARDWARE);
+        cmpString("Build.DISPLAY", opt(dev, "displayId"), Build.DISPLAY);
     }
 
     private void cmpVersionInfo(JSONObject dev) {
@@ -810,6 +814,22 @@ public class MainActivity extends Activity {
                 Build.VERSION.RELEASE, Cmp.INFO);
         cmpRow("Build.VERSION.SDK_INT", optNumber(dev, "apiLevel"),
                 String.valueOf(Build.VERSION.SDK_INT), Cmp.INFO);
+        // Spoofed since 2026-10-02: INCREMENTAL (parsed from the fingerprint)
+        // and SECURITY_PATCH (researched per device row).
+        cmpString("Build.VERSION.INCREMENTAL", opt(dev, "buildIncremental"),
+                Build.VERSION.INCREMENTAL);
+        String ePatch = opt(dev, "securityPatch");
+        if ("unknown".equals(ePatch)) ePatch = null; // not spoofed for unknown rows
+        cmpString("Build.VERSION.SECURITY_PATCH", ePatch, Build.VERSION.SECURITY_PATCH);
+        // JVM property spoof: System.getProperty("os.version") should report
+        // the profile's plausible kernel, not the host kernel.
+        String oKernel;
+        try {
+            oKernel = System.getProperty("os.version");
+        } catch (Exception e) {
+            oKernel = null;
+        }
+        cmpString("os.version(kernel)", opt(dev, "kernelVersion"), oKernel);
     }
 
     private void cmpAndroidId() {
@@ -909,6 +929,42 @@ public class MainActivity extends Activity {
         }
         if (!extra.isEmpty()) {
             raw("  unexpected (observed but not expected): " + sortedTypeList(extra));
+        }
+    }
+
+    /**
+     * Sensor identity spoof: for each expected sensor entry, the observed
+     * Sensor of the same type must report the profile's vendor and name —
+     * not the host's real hardware strings. UNKNOWN when there is no
+     * expected entry or no observed sensor of that type.
+     */
+    private void cmpSensorIdentity() {
+        JSONArray arr = expectedProfile == null ? null : expectedProfile.optJSONArray("sensors");
+        Map<Integer, Sensor> observed = new HashMap<>();
+        try {
+            SensorManager sm = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+            if (sm != null) {
+                for (Sensor s : sm.getSensorList(Sensor.TYPE_ALL)) {
+                    if (!observed.containsKey(s.getType())) observed.put(s.getType(), s);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        if (arr == null) {
+            cmpRow("sensor.vendor", null, null, Cmp.UNKNOWN);
+            cmpRow("sensor.name", null, null, Cmp.UNKNOWN);
+            return;
+        }
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject s = arr.optJSONObject(i);
+            if (s == null || !s.has("type") || s.isNull("type")) continue;
+            int type = s.optInt("type");
+            Sensor o = observed.get(type);
+            String label = "sensor[" + type + "]";
+            cmpString(label + ".vendor", opt(s, "vendor"),
+                    o == null ? null : o.getVendor());
+            cmpString(label + ".name", opt(s, "name"),
+                    o == null ? null : o.getName());
         }
     }
 

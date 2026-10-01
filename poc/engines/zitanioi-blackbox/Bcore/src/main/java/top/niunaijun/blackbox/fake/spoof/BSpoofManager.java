@@ -36,7 +36,9 @@ import top.niunaijun.blackbox.utils.Slog;
  *    "device":"husky","product":"husky","board":"husky","hardware":"husky",
  *    "fingerprint":"google/husky/husky:14/UQ1A.240205.002/12038998:user/release-keys",
  *    "buildId":"UQ1A.240205.002","buildTags":"release-keys","buildType":"user",
- *    "androidVersion":"14","apiLevel":34,"securityPatch":"2024-01-05"},
+ *    "androidVersion":"14","apiLevel":34,"securityPatch":"2024-01-05",
+ *    "displayId":"UQ1A.240205.002","buildIncremental":"12038998",
+ *    "kernelVersion":"6.1.25-android14-4-00001-g3f2e1d0c9b8a"},
  *  "androidId":"a1b2c3d4e5f60718",
  *  "location":{"latitude":37.42,"longitude":-122.08,"accuracy":12.0,"altitude":10.0,
  *    "speed":0.0,"bearing":0.0,
@@ -47,10 +49,14 @@ import top.niunaijun.blackbox.utils.Slog;
  *    "deviceId":"...","subscriberId":"..."}}
  * </pre>
  *
- * <p>Intentionally NOT spoofed: {@code Build.VERSION.*} (SDK_INT/RELEASE drive the real
- * framework in-process; spoofing them destabilizes the guest — treated as Host Provided).
- * {@code Build.getSerial()} reads the {@code ro.serialno} system property natively and is
- * NOT covered by static-field reflection — Partially Supported.
+ * <p>Intentionally NOT spoofed: {@code Build.VERSION.RELEASE} and
+ * {@code Build.VERSION.SDK_INT} (they drive the real framework in-process;
+ * spoofing them destabilizes the guest — treated as Host Provided).
+ * {@code Build.VERSION.SECURITY_PATCH} is spoofed only when the profile
+ * carries a researched date (rows with "unknown" pass the host value
+ * through). {@code Build.getSerial()} reads the {@code ro.serialno} system
+ * property natively and is NOT covered by static-field reflection —
+ * Partially Supported.
  */
 public class BSpoofManager {
     private static final String TAG = "BSpoofManager";
@@ -71,6 +77,13 @@ public class BSpoofManager {
             {"TYPE", "buildType"},
             {"BOARD", "board"},
             {"HARDWARE", "hardware"},
+            {"DISPLAY", "displayId"},
+    };
+
+    /** android.os.Build.VERSION static field name -> profile device key. */
+    private static final String[][] VERSION_FIELD_MAP = {
+            {"INCREMENTAL", "buildIncremental"},
+            {"SECURITY_PATCH", "securityPatch"},
     };
 
     private static final BSpoofManager sInstance = new BSpoofManager();
@@ -90,7 +103,9 @@ public class BSpoofManager {
     private boolean mSpoofActive;
 
     private final Map<String, String> mBuildFields = new HashMap<>();
+    private final Map<String, String> mVersionFields = new HashMap<>();
     private String mAndroidId;
+    private String mKernelVersion;
 
     private double mLatitude;
     private double mLongitude;
@@ -100,6 +115,8 @@ public class BSpoofManager {
     private float mMovementSpeedMps;
     private float mMovementBearingDeg;
     private int[] mSensorTypes = new int[0];
+    private final Map<Integer, String> mSensorNames = new HashMap<>();
+    private final Map<Integer, String> mSensorVendors = new HashMap<>();
 
     private String mSsid;
     private String mBssid;
@@ -125,8 +142,9 @@ public class BSpoofManager {
 
     /**
      * Returns the profile value for an android.os.Build static field name
-     * (MANUFACTURER, BRAND, MODEL, DEVICE, PRODUCT, FINGERPRINT, ID, TAGS, TYPE,
-     * BOARD, HARDWARE), or null when spoofing is inactive / the field is absent.
+     * (MANUFACTURER, BRAND, MODEL, DEVICE, PRODUCT, FINGERPRINT, ID, TAGS,
+     * TYPE, BOARD, HARDWARE, DISPLAY), or null when spoofing is inactive /
+     * the field is absent.
      */
     public String getBuildField(String name) {
         ensureLoaded();
@@ -134,6 +152,32 @@ public class BSpoofManager {
             return null;
         }
         return mBuildFields.get(name);
+    }
+
+    /**
+     * Returns the profile value for an android.os.Build.VERSION static field
+     * name (INCREMENTAL, SECURITY_PATCH), or null when spoofing is inactive /
+     * the field is absent. SECURITY_PATCH is absent for device rows whose
+     * researched patch is "unknown" — callers must pass through the host
+     * value rather than spoofing a fabricated date.
+     */
+    public String getVersionField(String name) {
+        ensureLoaded();
+        if (!mSpoofActive || name == null) {
+            return null;
+        }
+        return mVersionFields.get(name);
+    }
+
+    /**
+     * Plausible kernel version for {@code System.getProperty("os.version")},
+     * or null when spoofing is inactive / absent. Shape-real per API level
+     * (5.10.x for 33, 6.1.x for 34); stops the host's real kernel (e.g. a
+     * 4.19 Lineage kernel) from leaking through the JVM property.
+     */
+    public String getKernelVersion() {
+        ensureLoaded();
+        return mSpoofActive ? mKernelVersion : null;
     }
 
     public String getAndroidId() {
@@ -180,6 +224,23 @@ public class BSpoofManager {
     public int[] getSensorTypes() {
         ensureLoaded();
         return mSensorTypes;
+    }
+
+    /**
+     * Profile's vendor string for a sensor type (e.g. "STMicroelectronics"),
+     * or null when spoofing is inactive / the type has no profile entry.
+     * Used by the Sensor.getVendor() Pine hook to hide the host's real
+     * sensor hardware (bmi3x0/BOSCH, akm, eminent, qualcomm, ...).
+     */
+    public String getSensorVendor(int type) {
+        ensureLoaded();
+        return mSpoofActive ? mSensorVendors.get(type) : null;
+    }
+
+    /** Profile's name string for a sensor type, or null when unavailable. */
+    public String getSensorName(int type) {
+        ensureLoaded();
+        return mSpoofActive ? mSensorNames.get(type) : null;
     }
 
     /** SSID as Android reports it, e.g. {@code "\"SandboxNet\""}. */
@@ -234,8 +295,10 @@ public class BSpoofManager {
      * static fields are initialized once per process at class-init.
      *
      * <p>No-op unless this is a guest (BAppClient) process with an active profile.
-     * Build.VERSION.* is intentionally left untouched. Build.getSerial() reads the
-     * system property natively and is NOT covered by this method.
+     * Build.VERSION.RELEASE / SDK_INT are intentionally left untouched (they
+     * drive the real framework); INCREMENTAL and SECURITY_PATCH are patched
+     * when the profile carries them. Build.getSerial() reads the system
+     * property natively and is NOT covered by this method.
      */
     public void applyBuildSpoofing() {
         if (!BlackBoxCore.get().isBlackProcess()) {
@@ -245,17 +308,21 @@ public class BSpoofManager {
             return;
         }
         for (Map.Entry<String, String> entry : mBuildFields.entrySet()) {
-            setBuildStaticField(entry.getKey(), entry.getValue());
+            setBuildStaticField(Build.class, entry.getKey(), entry.getValue());
         }
-        Slog.d(TAG, "applyBuildSpoofing: patched " + mBuildFields.size() + " Build fields");
+        for (Map.Entry<String, String> entry : mVersionFields.entrySet()) {
+            setBuildStaticField(Build.VERSION.class, entry.getKey(), entry.getValue());
+        }
+        Slog.d(TAG, "applyBuildSpoofing: patched " + mBuildFields.size()
+                + " Build fields + " + mVersionFields.size() + " Build.VERSION fields");
     }
 
-    private void setBuildStaticField(String fieldName, String value) {
+    private void setBuildStaticField(Class<?> clazz, String fieldName, String value) {
         if (value == null) {
             return;
         }
         try {
-            Field field = Build.class.getDeclaredField(fieldName);
+            Field field = clazz.getDeclaredField(fieldName);
             field.setAccessible(true);
             // NOTE (2026-10-01): do NOT use the old "Field.modifiers" trick to strip
             // final — java.lang.reflect.Field has no such declared field on modern
@@ -265,7 +332,8 @@ public class BSpoofManager {
             // assigned via getString() in <clinit>, not compile-time constants).
             field.set(null, value);
         } catch (Throwable t) {
-            Slog.w(TAG, "applyBuildSpoofing: failed to patch Build." + fieldName, t);
+            Slog.w(TAG, "applyBuildSpoofing: failed to patch " + clazz.getSimpleName()
+                    + "." + fieldName, t);
         }
     }
 
@@ -323,6 +391,20 @@ public class BSpoofManager {
                     mBuildFields.put(mapping[0], value);
                 }
             }
+            for (String[] mapping : VERSION_FIELD_MAP) {
+                String value = device.optString(mapping[1], null);
+                // "unknown" patch rows carry no researched date — never
+                // spoof a fabricated security patch; pass the host value
+                // through instead.
+                if (value == null || value.isEmpty() || value.equals("unknown")) {
+                    continue;
+                }
+                mVersionFields.put(mapping[0], value);
+            }
+            String kernel = device.optString("kernelVersion", null);
+            if (kernel != null && !kernel.isEmpty()) {
+                mKernelVersion = kernel;
+            }
         }
 
         mAndroidId = root.optString("androidId", null);
@@ -347,7 +429,16 @@ public class BSpoofManager {
             for (int i = 0; i < sensors.length(); i++) {
                 JSONObject sensor = sensors.optJSONObject(i);
                 if (sensor != null && sensor.has("type")) {
-                    types.add(sensor.optInt("type"));
+                    int type = sensor.optInt("type");
+                    types.add(type);
+                    String name = sensor.optString("name", null);
+                    String vendor = sensor.optString("vendor", null);
+                    if (name != null && !name.isEmpty()) {
+                        mSensorNames.put(type, name);
+                    }
+                    if (vendor != null && !vendor.isEmpty()) {
+                        mSensorVendors.put(type, vendor);
+                    }
                 }
             }
             mSensorTypes = new int[types.size()];
