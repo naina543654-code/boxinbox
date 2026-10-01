@@ -311,7 +311,14 @@ class BlackBoxRuntime : SandboxRuntime {
                 .listFiles { f -> f.isDirectory }
                 ?.forEach { pkgs += it.name }
         }
-        trace("phase=collect: pkgs=${pkgs.size} [${pkgs.joinToString(",")}]")
+        // Diagnostic: how many packages does the engine think exist at all?
+        // If this is 0 while pkgs is non-empty (from disk), the engine lost
+        // its in-memory state (e.g. bad re-init) and uninstalls will no-op.
+        val enginePkgCount = runCatching {
+            BPackageManagerService.get().getBPackageSettings().size
+        }.getOrDefault(-1)
+        trace("phase=collect: pkgs=${pkgs.size} [${pkgs.joinToString(",")}] " +
+            "enginePackages=$enginePkgCount")
 
         // 1. Stop running guests so open files don't block deletion.
         trace("phase=stop pkgs=${pkgs.size}")
@@ -344,12 +351,16 @@ class BlackBoxRuntime : SandboxRuntime {
         check(gmsGone) { "wipe aborted: GMS still installed after uninstallGms" }
         trace("phase=uninstall-gms: verified gone")
 
-        // 4. Engine deleteUser ONCE, purely for bookkeeping. Its internal
-        //    package loop now runs over an empty map so the
-        //    iterate-while-removing bug cannot trigger.
-        trace("phase=engine-delete-user")
-        runCatching { users().deleteUser(VIRTUAL_USER_ID) }
-            .onFailure { trace("phase=engine-delete-user threw: ${it.message}") }
+        // 4. NOTE: we deliberately do NOT call the engine's deleteUser here.
+        //    BUserManagerService.deleteUser holds mUserLock+mUsers while
+        //    calling into BPackageManagerService.deleteUser (lock-order
+        //    inversion -> potential deadlock), and its internal package loop
+        //    removes entries from the ArrayMap it iterates (silently skipping
+        //    packages). It is also redundant: step 2/3 removed every package,
+        //    step 5 clears every data dir, and step 6 re-creates the user
+        //    record. The user record itself (id + status) carries no package
+        //    state, so there is nothing left for deleteUser to clean.
+        trace("phase=engine-delete-user: SKIPPED (redundant and unsafe; see note)")
 
         // 5. Scorched earth: force-remove every on-disk location that can
         //    hold user-0 state. Survivors get one retry after a re-kill;
