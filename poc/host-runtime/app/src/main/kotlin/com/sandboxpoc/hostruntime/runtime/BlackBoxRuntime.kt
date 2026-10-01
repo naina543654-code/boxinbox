@@ -5,6 +5,7 @@ import android.util.Log
 import top.niunaijun.blackbox.BlackBoxCore
 import top.niunaijun.blackbox.core.GmsCore
 import top.niunaijun.blackbox.core.env.BEnvironment
+import top.niunaijun.blackbox.core.system.pm.BPackageManagerService
 import top.niunaijun.blackbox.core.system.user.BUserManagerService
 import java.io.File
 import java.nio.file.Files
@@ -248,29 +249,61 @@ class BlackBoxRuntime : SandboxRuntime {
      * instead of silently kept. Each phase logs to logcat (tag
      * BoxInBoxWipe) so a slow or stuck wipe shows exactly where it is.
      */
+    /**
+     * Destroys ALL guest state for the virtual user, verified step by step.
+     *
+     * Hard lessons encoded here:
+     * - The engine's client-side proxies (BPackageManager) SILENTLY SWALLOW
+     *   RemoteException (uninstall = no-op, getInstalledPackages = empty
+     *   list), and the service's uninstallPackageAsUser SILENTLY RETURNS
+     *   when the package is missing / not installed for the user / XPOSED.
+     *   So every destructive step is verified IMMEDIATELY through the
+     *   engine's direct service singletons (no proxies), and any step that
+     *   had no effect FAILS LOUDLY naming the package — instead of limping
+     *   on to a meaningless end-of-wipe check.
+     * - The engine's deleteUser iterates the package ArrayMap while its own
+     *   uninstall removes entries from that same map, silently skipping
+     *   packages; it runs LAST and only for bookkeeping.
+     * - The engine's list queries false-pass when the user record is absent,
+     *   so the user is (re-)created and its existence VERIFIED before any
+     *   check that depends on it.
+     * - A file trace (filesDir/wipe-trace.log) records every phase, so a
+     *   hung or dead wipe thread still leaves evidence of where it stopped.
+     */
     private fun wipeVirtualUser() {
-        // Anomalies seen along the way (diagnostic context only).
-        val issues = mutableListOf<String>()
-
-        // 0. Heal the engine's user record FIRST. A previous failed wipe
-        //    may have removed user 0 from the engine's user table while
-        //    leaving packages behind; in that state every
-        //    uninstallPackageAsUser is a SILENT NO-OP (the engine's
-        //    isInstalled() returns false for an unknown user), which is
-        //    exactly "uninstall/delete/reset all do nothing". createUser
-        //    is idempotent: a no-op when the user already exists.
-        Log.i(TAG_WIPE, "phase=ensure-user: calling createUser($VIRTUAL_USER_ID)")
-        runCatching { users().createUser(VIRTUAL_USER_ID) }
-            .onSuccess { Log.i(TAG_WIPE, "phase=ensure-user: user record present") }
-            .onFailure {
-                Log.w(TAG_WIPE, "phase=ensure-user: createUser threw: " +
-                    "${it::class.java.simpleName}: ${it.message}")
-                issues += "createUser threw: ${it.message}"
+        val traceFile = File(BlackBoxCore.getContext().filesDir, "wipe-trace.log")
+        fun trace(msg: String) {
+            val line = "${System.currentTimeMillis()} $msg"
+            Log.i(TAG_WIPE, msg)
+            runCatching {
+                traceFile.appendText(line + "\n")
             }
+        }
 
-        Log.i(TAG_WIPE, "phase=collect")
-        // Packages from the engine list (GMS-filtered) plus every on-disk
-        // app dir (covers GMS clones and partial installs the list hides).
+        // Direct service singletons — no swallowing proxies. If the engine
+        // never initialized, fail loudly instead of false-passing.
+        val pm = BPackageManagerService.get()
+        check(pm != null) { "wipe aborted: engine package service not initialized" }
+        fun userExists(): Boolean = runCatching { users().exists(VIRTUAL_USER_ID) }
+            .getOrDefault(false)
+        fun isInstalledDirect(pkg: String): Boolean = runCatching {
+            pm.isInstalled(pkg, VIRTUAL_USER_ID)
+        }.getOrDefault(false)
+
+        // 0. Heal the engine's user record FIRST, then VERIFY it exists. A
+        //    previous failed wipe may have removed user 0 while leaving
+        //    packages behind; in that state every uninstallPackageAsUser is
+        //    a SILENT NO-OP (isInstalled false for unknown user).
+        trace("phase=ensure-user: createUser($VIRTUAL_USER_ID)")
+        runCatching { users().createUser(VIRTUAL_USER_ID) }
+            .onFailure { trace("phase=ensure-user: createUser threw: ${it.message}") }
+        check(userExists()) {
+            "wipe aborted: virtual user $VIRTUAL_USER_ID missing after createUser — " +
+                "every uninstall would silently no-op"
+        }
+        trace("phase=ensure-user: user record verified present")
+
+        trace("phase=collect")
         val pkgs = mutableSetOf<String>()
         runCatching { installedGuestPackages() }.onSuccess { pkgs += it }
         runCatching {
@@ -278,65 +311,49 @@ class BlackBoxRuntime : SandboxRuntime {
                 .listFiles { f -> f.isDirectory }
                 ?.forEach { pkgs += it.name }
         }
+        trace("phase=collect: pkgs=${pkgs.size} [${pkgs.joinToString(",")}]")
 
         // 1. Stop running guests so open files don't block deletion.
-        Log.i(TAG_WIPE, "phase=stop pkgs=${pkgs.size}")
+        trace("phase=stop pkgs=${pkgs.size}")
         for (pkg in pkgs) {
             runCatching { core().stopPackage(pkg, VIRTUAL_USER_ID) }
         }
 
-        // 2. Isolated per-package uninstall for EVERY collected package,
-        //    while user 0 still exists (the engine's isInstalled() and list
-        //    queries go blind once the user record is gone). Each uninstall
-        //    is its own engine call — never iterating the engine's package
-        //    map while it mutates, which is exactly what breaks the
-        //    engine's own deleteUser (it removes packages from the ArrayMap
-        //    it is iterating, silently skipping half of them).
-        Log.i(TAG_WIPE, "phase=uninstall-all count=${pkgs.size}")
+        // 2. Isolated per-package uninstall while user 0 exists, each
+        //    VERIFIED IMMEDIATELY. If the engine silently skips one (stale
+        //    state, XPOSED flag, whatever), we fail here naming the package
+        //    instead of discovering it at the end (or never).
+        trace("phase=uninstall-all count=${pkgs.size}")
         for (pkg in pkgs) {
-            runCatching {
-                Log.i(TAG_WIPE, "uninstalling $pkg")
-                core().uninstallPackageAsUser(pkg, VIRTUAL_USER_ID)
-                Log.i(TAG_WIPE, "uninstalled $pkg")
-            }.onFailure {
-                Log.w(TAG_WIPE, "uninstall $pkg threw: " +
-                    "${it::class.java.simpleName}: ${it.message}")
-                issues += "uninstall $pkg threw: ${it.message}"
+            trace("uninstalling $pkg")
+            runCatching { core().uninstallPackageAsUser(pkg, VIRTUAL_USER_ID) }
+                .onFailure { trace("uninstall $pkg threw: ${it.message}") }
+            check(!isInstalledDirect(pkg)) {
+                "wipe aborted: uninstall of $pkg had no effect — still " +
+                    "registered for user $VIRTUAL_USER_ID"
             }
+            trace("uninstalled $pkg (verified gone)")
         }
 
-        // 3. GMS via the engine's own uninstaller (its packages are hidden
-        //    from the list above, and may carry flags the generic path
-        //    skips).
-        Log.i(TAG_WIPE, "phase=uninstall-gms: calling uninstallGms($VIRTUAL_USER_ID)")
-        runCatching {
-            if (!core().uninstallGms(VIRTUAL_USER_ID)) {
-                issues += "GMS uninstall reported incomplete"
-            }
-        }.onSuccess { Log.i(TAG_WIPE, "phase=uninstall-gms: returned") }
-            .onFailure {
-                Log.w(TAG_WIPE, "phase=uninstall-gms threw: ${it.message}")
-                issues += "GMS uninstall threw: ${it.message}"
-            }
+        // 3. GMS via the engine's own uninstaller, verified directly.
+        trace("phase=uninstall-gms")
+        runCatching { core().uninstallGms(VIRTUAL_USER_ID) }
+            .onFailure { trace("phase=uninstall-gms threw: ${it.message}") }
+        val gmsGone = runCatching { !GmsCore.isInstalledGoogleService(VIRTUAL_USER_ID) }
+            .getOrDefault(false)
+        check(gmsGone) { "wipe aborted: GMS still installed after uninstallGms" }
+        trace("phase=uninstall-gms: verified gone")
 
-        // 4. Engine deleteUser ONCE, purely for bookkeeping (user record,
-        //    data/user/0, external dir). Its internal package loop now runs
-        //    over an empty map, so the iterate-while-removing bug cannot
-        //    trigger. Best-effort: the sweep and verify below are the real
-        //    guarantees.
-        Log.i(TAG_WIPE, "phase=engine-delete-user: calling deleteUser($VIRTUAL_USER_ID)")
+        // 4. Engine deleteUser ONCE, purely for bookkeeping. Its internal
+        //    package loop now runs over an empty map so the
+        //    iterate-while-removing bug cannot trigger.
+        trace("phase=engine-delete-user")
         runCatching { users().deleteUser(VIRTUAL_USER_ID) }
-            .onSuccess { Log.i(TAG_WIPE, "phase=engine-delete-user: returned cleanly") }
-            .onFailure {
-                Log.w(TAG_WIPE, "phase=engine-delete-user: threw: " +
-                    "${it::class.java.simpleName}: ${it.message}")
-                issues += "engine deleteUser threw: ${it.message}"
-            }
+            .onFailure { trace("phase=engine-delete-user threw: ${it.message}") }
 
         // 5. Scorched earth: force-remove every on-disk location that can
-        //    hold user-0 state — including ones the engine only reaches via
-        //    its per-package loop (data/user_de/0, data/app/<pkg>,
-        //    hotfix/u0). Survivors are fatal.
+        //    hold user-0 state. Survivors get one retry after a re-kill;
+        //    anything still standing fails loudly.
         val dirs = mutableListOf(
             BEnvironment.getUserDir(VIRTUAL_USER_ID),
             File(BEnvironment.getVirtualRoot(), "data/user_de/$VIRTUAL_USER_ID"),
@@ -345,18 +362,13 @@ class BlackBoxRuntime : SandboxRuntime {
         )
         pkgs.forEach { dirs += BEnvironment.getAppDir(it) }
         val targets = dirs.distinct().filter { it.exists() }
-        Log.i(TAG_WIPE, "phase=sweep-dirs count=${targets.size}")
+        trace("phase=sweep-dirs count=${targets.size}")
         val dirSurvivors = mutableListOf<String>()
         for (d in targets) {
             if (!deleteTree(d)) dirSurvivors += d.absolutePath
         }
-        // One retry: a persistent guest process (notably GMS) can respawn
-        // between the kill and the sweep and recreate its dirs. Re-kill,
-        // then immediately re-sweep only the survivors; anything still
-        // standing after that is genuinely stuck and fails loudly below.
         if (dirSurvivors.isNotEmpty()) {
-            Log.w(TAG_WIPE, "phase=sweep-retry survivors=${dirSurvivors.size}: " +
-                dirSurvivors.joinToString(","))
+            trace("phase=sweep-retry survivors=${dirSurvivors.size}")
             for (pkg in pkgs) {
                 runCatching { core().stopPackage(pkg, VIRTUAL_USER_ID) }
             }
@@ -365,50 +377,39 @@ class BlackBoxRuntime : SandboxRuntime {
             for (path in retry) {
                 if (!deleteTree(File(path))) dirSurvivors += path
             }
-            Log.i(TAG_WIPE, "phase=sweep-retry done, survivors=${dirSurvivors.size}")
+        }
+        check(dirSurvivors.isEmpty()) {
+            "wipe aborted: dirs survived deletion: ${dirSurvivors.joinToString(",")}"
+        }
+        trace("phase=sweep-dirs: all clear")
+
+        // 6. Re-create the user record and VERIFY it exists before the final
+        //    check — the engine's queries false-pass when the user is absent.
+        trace("phase=verify-user: re-creating user $VIRTUAL_USER_ID")
+        runCatching { users().createUser(VIRTUAL_USER_ID) }
+            .onFailure { trace("phase=verify-user: createUser threw: ${it.message}") }
+        check(userExists()) {
+            "wipe aborted: virtual user $VIRTUAL_USER_ID missing before " +
+                "verification — checks would be meaningless"
         }
 
-        // 6. Re-create the user record before verifying. The engine's
-        //    list queries (getInstalledPackages, isInstalled, isInstallGms)
-        //    all return empty/false when the user record is absent — so
-        //    verifying AFTER the engine deleteUser would false-pass even
-        //    with packages still registered. Re-creating makes the check
-        //    below meaningful. Harmless for delete (the next identity
-        //    creates the user again); required for reset.
-        Log.i(TAG_WIPE, "phase=verify-user: re-creating user $VIRTUAL_USER_ID for verification")
-        runCatching { users().createUser(VIRTUAL_USER_ID) }
-            .onFailure {
-                Log.w(TAG_WIPE, "phase=verify-user: createUser threw: ${it.message}")
-                issues += "verify createUser threw: ${it.message}"
-            }
-
-        // 7. In-memory verification: nothing still registered for user 0.
-        //    Survivors are fatal; the lists above are only context.
-        Log.i(TAG_WIPE, "phase=verify")
-        val stillRegistered = runCatching { installedGuestPackages() }
-            .getOrDefault(emptyList())
-        val gmsLeft = runCatching { core().isInstallGms(VIRTUAL_USER_ID) }
+        // 7. Final verification through direct service queries (no proxies):
+        //    every collected package must be gone, GMS must be gone.
+        trace("phase=verify")
+        val stillRegistered = pkgs.filter { isInstalledDirect(it) }
+        val gmsLeft = runCatching { GmsCore.isInstalledGoogleService(VIRTUAL_USER_ID) }
             .getOrDefault(false)
-
-        Log.i(TAG_WIPE, "verify: dirSurvivors=${dirSurvivors.size} " +
-            "stillRegistered=${stillRegistered.size} gmsLeft=$gmsLeft " +
-            "issues=${issues.size}")
-        check(dirSurvivors.isEmpty() && stillRegistered.isEmpty() && !gmsLeft) {
+        trace("verify: stillRegistered=${stillRegistered.size} gmsLeft=$gmsLeft")
+        check(stillRegistered.isEmpty() && !gmsLeft) {
             buildString {
                 append("identity wipe incomplete")
-                if (dirSurvivors.isNotEmpty()) {
-                    append("; dirs survived: ${dirSurvivors.joinToString(",")}")
-                }
                 if (stillRegistered.isNotEmpty()) {
                     append("; still registered: ${stillRegistered.joinToString(",")}")
                 }
                 if (gmsLeft) append("; GMS still registered")
-                if (issues.isNotEmpty()) {
-                    append(" [warnings: ${issues.joinToString("; ")}]")
-                }
             }.toString()
         }
-        Log.i(TAG_WIPE, "wipe complete")
+        trace("wipe complete")
     }
 
     /**
