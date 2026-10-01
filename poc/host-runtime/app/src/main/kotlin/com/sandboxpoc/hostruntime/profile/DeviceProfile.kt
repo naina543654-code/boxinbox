@@ -170,7 +170,11 @@ private val COUNTRY_LOCALE: Map<String, Pair<String, String>> = mapOf(
 internal fun newLocalMac(): String {
     val r = java.security.SecureRandom()
     val b = ByteArray(6); r.nextBytes(b)
-    b[0] = (b[0].toInt() and 0xFE or 0x02).toByte()
+    // Fixed 0x02 first byte: locally-administered unicast, matching the
+    // validator (LOCAL_MAC_RE) and the documented "02:xx:.." shape. Setting
+    // only the local bit (0x02) without clearing the rest produced first
+    // bytes like 06/0A/12.., which the validator rejects.
+    b[0] = 0x02
     return b.joinToString(":") { "%02X".format(it) }
 }
 
