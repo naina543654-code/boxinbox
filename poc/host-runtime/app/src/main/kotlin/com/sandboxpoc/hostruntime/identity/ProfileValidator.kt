@@ -27,7 +27,7 @@ object ProfileValidator {
     private val SUBSCRIBER_ID_RE = Regex("^[0-9]{15}$")
     private val BSSID_RE = Regex("^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
     private val SECURITY_PATCH_RE = Regex("^\\d{4}-\\d{2}-\\d{2}$")
-    private val KERNEL_RE = Regex("^\\d+\\.\\d+\\.\\d+(-android\\d+)?(-\\d+)?(-g[0-9a-f]+)?$")
+    private val KERNEL_RE = Regex("^\\d+\\.\\d+\\.\\d+(-android\\d+)?(-\\d+)*(-g[0-9a-f]+)?$")
 
     fun validate(profile: DeviceProfile): List<String> {
         val violations = mutableListOf<String>()
