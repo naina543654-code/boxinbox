@@ -53,6 +53,21 @@ public final class BTelephonyApiSpoof {
                 // Network operator numeric (MCC+MNC), e.g. "42701".
                 hookOperatorGetter("getNetworkOperator", new Class<?>[0], true);
                 hookOperatorGetter("getNetworkOperator", new Class<?>[]{int.class}, true);
+                // Review 2026-10-05: defense-in-depth. The SIM operator and
+                // country-ISO getters currently rely on the ITelephony binder
+                // proxy — but the network-operator getters proved
+                // TelephonyManager methods can bypass the proxy entirely on
+                // some framework builds. Hook the public API directly too. A
+                // fresh identity's SIM belongs to its spoofed operator, so
+                // the per-identity operator/country values are coherent here.
+                hookOperatorGetter("getSimOperator", new Class<?>[0], true);
+                hookOperatorGetter("getSimOperator", new Class<?>[]{int.class}, true);
+                hookOperatorGetter("getSimOperatorName", new Class<?>[0], false);
+                hookOperatorGetter("getSimOperatorName", new Class<?>[]{int.class}, false);
+                hookCountryIsoGetter("getSimCountryIso", new Class<?>[0]);
+                hookCountryIsoGetter("getSimCountryIso", new Class<?>[]{int.class});
+                hookCountryIsoGetter("getNetworkCountryIso", new Class<?>[0]);
+                hookCountryIsoGetter("getNetworkCountryIso", new Class<?>[]{int.class});
                 // Line-1 (MSISDN) number: the ITelephony binder hook above
                 // covers the service path, but hook the public API too — the
                 // operator getters proved these TelephonyManager methods can
@@ -129,6 +144,38 @@ public final class BTelephonyApiSpoof {
     /** Hooks {@code TelephonyManager.getLine1Number()} to the per-identity MSISDN. */
     private static void hookLine1Number() {
         hookStringGetter("getLine1Number", new Class<?>[0], ValueKind.PHONE_NUMBER);
+    }
+
+    /**
+     * Hooks a no/slot-arg {@code TelephonyManager} country-ISO getter to the
+     * per-identity country (e.g. "nl"). Same fail-open shape as
+     * {@link #hookOperatorGetter}: inactive profile passes through.
+     */
+    private static void hookCountryIsoGetter(String name, Class<?>[] params) {
+        final Method target;
+        try {
+            target = TelephonyManager.class.getDeclaredMethod(name, params);
+        } catch (Throwable t) {
+            Slog.e(TAG, "TelephonyManager." + name + "/" + params.length + " not found; skipping", t);
+            return;
+        }
+        try {
+            Pine.hook(target, new MethodHook() {
+                @Override
+                public void beforeCall(Pine.CallFrame callFrame) {
+                    BSpoofManager spoof = BSpoofManager.get();
+                    if (!spoof.isSpoofActive()) {
+                        return;
+                    }
+                    String value = spoof.getCountryIso();
+                    if (value != null) {
+                        callFrame.setResult(value);
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            Slog.e(TAG, "Pine hook on TelephonyManager." + name + " failed", t);
+        }
     }
 
     /** Which per-identity profile value a hooked string getter serves. */
