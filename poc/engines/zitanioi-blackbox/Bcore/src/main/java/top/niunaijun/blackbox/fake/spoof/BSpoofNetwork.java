@@ -384,6 +384,23 @@ public final class BSpoofNetwork {
 
         SanitizingCallback(ConnectivityManager.NetworkCallback delegate) {
             this.delegate = delegate;
+            copyFlags(delegate);
+        }
+
+        /**
+         * Best-effort copy of the callback flags (e.g.
+         * FLAG_INCLUDE_LOCATION_INFO) so wrapping doesn't silently drop
+         * guest-requested behavior. Fail-open: any failure keeps default flags.
+         */
+        private void copyFlags(ConnectivityManager.NetworkCallback orig) {
+            try {
+                java.lang.reflect.Field f =
+                        ConnectivityManager.NetworkCallback.class
+                                .getDeclaredField("mFlags");
+                f.setAccessible(true);
+                f.setInt(this, f.getInt(orig));
+            } catch (Throwable ignored) {
+            }
         }
 
         @Override

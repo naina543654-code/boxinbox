@@ -62,7 +62,7 @@ public class INetworkManagementServiceProxy extends BinderInvocationStub {
      * reflection could read the real Wi-Fi MAC, bypassing the
      * {@code NetworkInterface.getHardwareAddress()} Pine hook. Rewrite the
      * hardware address to the per-identity MAC for wlan0 when active.
-     * (InterfaceConfiguration is @hide — field set reflectively.)
+     * (InterfaceConfiguration is @hide — the setter is invoked reflectively.)
      */
     @ProxyMethod("getInterfaceConfig")
     public static class GetInterfaceConfig extends MethodHook {
@@ -77,9 +77,8 @@ public class INetworkManagementServiceProxy extends BinderInvocationStub {
                         && "wlan0".equals(args[0])) {
                     String mac = spoof.getWifiMac();
                     if (mac != null) {
-                        java.lang.reflect.Field f =
-                                config.getClass().getField("hardwareAddress");
-                        f.set(config, mac);
+                        config.getClass().getMethod("setHardwareAddress", String.class)
+                                .invoke(config, mac);
                     }
                 }
             } catch (Throwable ignored) {
