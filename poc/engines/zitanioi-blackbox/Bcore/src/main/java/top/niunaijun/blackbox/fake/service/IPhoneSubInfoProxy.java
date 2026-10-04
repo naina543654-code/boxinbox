@@ -284,4 +284,101 @@ public class IPhoneSubInfoProxy extends ClassInvocationStub {
             return null;
         }
     }
+
+    /**
+     * Review 2026-10-05: the bare deprecated variants were still open on the
+     * direct-binder path (a guest reflecting on {@code iphonesubinfo} can
+     * call them even though the SDK hides them). Same treatment as their
+     * WithFeature/ForSubscriber siblings. Names verified against AOSP
+     * android14-release IPhoneSubInfo.aidl.
+     */
+    @ProxyMethod("getDeviceSvn")
+    public static class getDeviceSvn extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return spoofedOrLegacyDeviceId();
+        }
+    }
+
+    @ProxyMethod("getSubscriberId")
+    public static class getSubscriberId extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return spoofedOrLegacySubscriberId();
+        }
+    }
+
+    @ProxyMethod("getIccSerialNumber")
+    public static class getIccSerialNumber extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            BSpoofManager spoof = BSpoofManager.get();
+            if (spoof.isSpoofActive() && spoof.getSimSerial() != null) {
+                return spoof.getSimSerial();
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Review 2026-10-05: ISIM/IMS identifiers are SIM-derived stable values
+     * (IMPI/IMPU/domain/IST/PCSCF). No per-identity IMS profile exists;
+     * fail closed to null ("not present"), which is the normal state on
+     * devices without an ISIM app.
+     */
+    @ProxyMethod("getIsimImpi")
+    public static class getIsimImpi extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return null;
+        }
+    }
+
+    @ProxyMethod("getImsPrivateUserIdentity")
+    public static class getImsPrivateUserIdentity extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return null;
+        }
+    }
+
+    @ProxyMethod("getIsimDomain")
+    public static class getIsimDomain extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return null;
+        }
+    }
+
+    @ProxyMethod("getIsimImpu")
+    public static class getIsimImpu extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return null;
+        }
+    }
+
+    @ProxyMethod("getImsPublicUserIdentities")
+    public static class getImsPublicUserIdentities extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return null;
+        }
+    }
+
+    @ProxyMethod("getIsimIst")
+    public static class getIsimIst extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return null;
+        }
+    }
+
+    @ProxyMethod("getIsimPcscf")
+    public static class getIsimPcscf extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return null;
+        }
+    }
 }
