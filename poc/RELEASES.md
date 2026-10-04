@@ -11,7 +11,9 @@ see `poc/SPOOFING_MATRIX.md` for the verification matrix.
 
 ## Unreleased (on `main` since `poc-v2.2`)
 
-- R3 audit fix batch (2026-10-05, sources TBD — third full code audit,
+- R3 audit fix batch (2026-10-05, sources `8f35440`, binaries `c1e60a4`,
+  host footer `8f35440 (2026-10-05)`, engine AAR md5
+  `45035bba8e471f4a4c0f33a0d929977b` — third full code audit,
   `files/CODE-AUDIT-R3-2026-10-05.md`: 62 OK / 1 partial / 0 broken of
   63 matrix rows; 16/19 batch items verified, 3 flawed; 1 critical
   regression found and fixed).
@@ -60,6 +62,11 @@ see `poc/SPOOFING_MATRIX.md` for the verification matrix.
   - Matrix doc corrections: fixed malformed row 77, corrected the SIM-serial
     and inactive-fallback rows, added the saved-networks row, refreshed the
     file map, documented the new Pine hooks.
+  - 7 new ProbeV2 rows for the R3 surfaces: `telephony.simOperator`,
+    `telephony.simOperatorName`, `telephony.simCountryIso`,
+    `telephony.nai` (PASS-on-null), `telephony.submgrPhoneNumber`,
+    `mediadrm.systemId`, `sysprop.ro.boot.serialno`, `build.radioVersion`.
+    None device-verified yet — same device test as the review batch applies.
 - Code review pass (2026-10-05, sources `add1897`): swept the engine for
   remaining direct-binder and public-API gaps after the re-audit batches.
   - `IPhoneSubInfo`: hooked the bare deprecated variants `getDeviceSvn`,
