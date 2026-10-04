@@ -92,6 +92,14 @@ internal fun socFor(hardware: String, model: String): Pair<String, String> {
 }
 
 /**
+ * Major Chrome version of the host's installed WebView, baked into the
+ * per-identity UA so the UA never claims a newer Chrome than the WebView
+ * package actually installed. Set at host app start from PackageManager;
+ * defaults to the last hardcoded value until then.
+ */
+internal var webViewChromeMajor: String = "126"
+
+/**
  * Prebuilt WebView default user-agent. Model and build ID come from the
  * spoofed profile, so the UA never contains the host's real model/build.
  * The engine returns this string verbatim for
@@ -100,7 +108,7 @@ internal fun socFor(hardware: String, model: String): Pair<String, String> {
 internal fun buildWebViewUa(androidVersion: String, model: String, buildId: String): String =
     "Mozilla/5.0 (Linux; Android $androidVersion; $model Build/$buildId) " +
         "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 " +
-        "Chrome/126.0.0.0 Mobile Safari/537.36"
+        "Chrome/$webViewChromeMajor.0.0.0 Mobile Safari/537.36"
 
 /**
  * IANA timezone for a profile country (primary zone; the per-identity city
@@ -1347,6 +1355,61 @@ data class SpoofProfile(
     /** Appends a JSON number from a Double without scientific notation. */
     private fun StringBuilder.jnum(value: Double) {
         append(java.math.BigDecimal.valueOf(value).toPlainString())
+    }
+
+    /**
+     * Per-identity `/system/build.prop` content. The engine redirects guest
+     * reads of `/system/build.prop` (and `getprop` with no key) to this
+     * file, so file-level readers see the spoofed identity instead of the
+     * host's real fingerprint. Only non-empty values are emitted.
+     */
+    fun toBuildProp(): String = buildString {
+        append("# per-identity spoofed build.prop — generated, do not edit\n")
+        fun prop(key: String, value: String) {
+            if (value.isNotEmpty()) append(key).append('=').append(value).append('\n')
+        }
+        val d = device
+        prop("ro.product.manufacturer", d.manufacturer)
+        prop("ro.product.brand", d.brand)
+        prop("ro.product.model", d.model)
+        prop("ro.product.device", d.device)
+        prop("ro.product.name", d.product)
+        prop("ro.product.board", d.board)
+        prop("ro.build.id", d.buildId)
+        prop("ro.build.display.id", d.displayId)
+        prop("ro.build.version.incremental", d.buildIncremental)
+        prop("ro.build.version.sdk", d.apiLevel.toString())
+        prop("ro.build.version.release", d.androidVersion)
+        prop("ro.build.version.security_patch", d.securityPatch)
+        if (d.buildTime > 0) prop("ro.build.date.utc", (d.buildTime / 1000).toString())
+        prop("ro.build.type", d.buildType)
+        prop("ro.build.user", d.buildUser)
+        prop("ro.build.host", d.buildHost)
+        prop("ro.build.tags", d.buildTags)
+        prop("ro.build.fingerprint", d.fingerprint)
+        prop("ro.soc.manufacturer", d.socManufacturer)
+        prop("ro.soc.model", d.socModel)
+        prop("ro.debuggable", "0")
+        prop("ro.secure", "1")
+        // Real, non-identifying hardware facts (same on any arm64 phone).
+        prop("ro.product.cpu.abi", "arm64-v8a")
+        prop("ro.product.cpu.abilist", "arm64-v8a,armeabi-v7a,armeabi")
+    }
+
+    /**
+     * Per-identity `/proc/version` content. Format mirrors real kernels:
+     * `Linux version <ver> (<builder>) #1 SMP PREEMPT <date>`.
+     */
+    fun toProcVersion(): String {
+        val kernel = device.kernelVersion.ifEmpty { "5.10.107-android13-4-00001-g000000000000" }
+        val date = if (device.buildTime > 0) {
+            java.text.SimpleDateFormat("EEE MMM dd HH:mm:ss zzz yyyy", java.util.Locale.US)
+                .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                .format(java.util.Date(device.buildTime))
+        } else {
+            "Thu Nov 02 12:00:00 UTC 2023"
+        }
+        return "Linux version $kernel (android-build@abfarm) #1 SMP PREEMPT $date\n"
     }
 
     companion object {

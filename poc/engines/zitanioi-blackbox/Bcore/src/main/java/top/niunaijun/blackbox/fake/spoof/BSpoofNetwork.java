@@ -7,6 +7,11 @@ import android.net.NetworkCapabilities;
 import android.net.NetworkInfo;
 
 import java.lang.reflect.Field;
+import java.net.NetworkInterface;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.List;
 
 import top.canyie.pine.Pine;
 import top.canyie.pine.callback.MethodHook;
@@ -59,6 +64,7 @@ public final class BSpoofNetwork {
             hookCapabilities();
             hookLinkProperties();
             hookNetworkInfo();
+            hookInterfaceEnumeration();
             sInstalled = true;
             Slog.d(TAG, "ConnectivityManager VPN-hiding hooks installed");
         }
@@ -163,6 +169,55 @@ public final class BSpoofNetwork {
     private static boolean isActive() {
         BSpoofManager spoof = BSpoofManager.get();
         return spoof != null && spoof.isSpoofActive();
+    }
+
+    /**
+     * Filters tunnel interfaces out of
+     * {@code NetworkInterface.getNetworkInterfaces()}: interface enumeration
+     * is not covered by the {@code ConnectivityManager} object rewrites
+     * above, and a {@code tun0} entry here re-exposes the VPN.
+     */
+    private static void hookInterfaceEnumeration() {
+        try {
+            Pine.hook(NetworkInterface.class.getDeclaredMethod("getNetworkInterfaces"),
+                    new MethodHook() {
+                        @Override
+                        public void afterCall(Pine.CallFrame callFrame) throws Throwable {
+                            if (callFrame.hasThrowable() || !isActive()) {
+                                return;
+                            }
+                            Object result = callFrame.getResult();
+                            if (!(result instanceof Enumeration)) {
+                                return;
+                            }
+                            List<NetworkInterface> kept = new ArrayList<>();
+                            Enumeration<?> enumeration = (Enumeration<?>) result;
+                            while (enumeration.hasMoreElements()) {
+                                Object o = enumeration.nextElement();
+                                if (!(o instanceof NetworkInterface)) {
+                                    continue;
+                                }
+                                NetworkInterface nif = (NetworkInterface) o;
+                                String name;
+                                try {
+                                    name = nif.getName();
+                                } catch (Throwable t) {
+                                    continue;
+                                }
+                                if (name != null && (name.startsWith("tun")
+                                        || name.startsWith("ppp")
+                                        || name.startsWith("wg")
+                                        || name.startsWith("vpn"))) {
+                                    continue;
+                                }
+                                kept.add(nif);
+                            }
+                            callFrame.setResult(Collections.enumeration(kept));
+                        }
+                    });
+        } catch (Throwable t) {
+            Slog.e(TAG, "Pine hook on getNetworkInterfaces failed", t);
+        }
     }
 
     /**

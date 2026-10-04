@@ -116,3 +116,16 @@ see `poc/SPOOFING_MATRIX.md` for the verification matrix.
 - Diagnosis behind this build: the 02:52 ProbeV2 report (fresh probe c49d14d, identity c6d0480c) still showed the whole 89edc0b/97497ff hook batch inert (DISPLAY/TIME/USER/HOST/BOOTLOADER/SoC/kernel/sensors/timezone/locale/UA). Source review found the hook code and the host↔engine profile JSON contract sound — the failure signature matches a host APK still embedding a pre-89edc0b engine exactly. The repo APKs below are rebuilt from current sources so the installed engine is known-good by construction; if the batch still fails with these, the hooks themselves get debugged next (logcat tags BSpoofOsIdentity / BSpoofJvmProps / BSpoofSensors).
 - Untested on-device, as usual: needs Jason's install + probe run.
 - Artifacts rebuilt from 6c7d7c7 and committed: engine AAR md5 8762a5fa569e1e72b3cd2d9d08b61ae6 (BSpoofNetwork/BSpoofOsIdentity verified in classes.jar); host APK versionName 1.0-poc-runtime-6c7d7c7; probe 1.0-6c7d7c7 (stamps verified in resources.arsc).
+
+## 2026-10-04 — detection-hardening batch (tell survey fixes)
+- Source-verified audit of guest-observable virtualization tells (see SPOOFING_MATRIX.md); patched the cheap, high-value ones:
+- `BProcFsSpoof` (new): per-process filtered `/proc/self/maps` (drops blackbox/libpine/host-package lines) + redirects for `/system/build.prop` and `/proc/version` to per-identity files the host now writes at identity creation (`ProfileStore`: `build.prop`, `proc_version`; also deleted on wipe).
+- `BRootHide`: new `ProcessBuilder.start()` hook (it bypassed the `Runtime.exec` filter); `getprop` interception — single-key queries answered from the profile (`BSpoofManager.getSystemPropertySpoof`), bare `getprop` dumps the spoofed build.prop; unknown keys pass through.
+- `BSpoofSystemProps`: typed overloads `getInt`/`getLong`/`getBoolean` hooked with the same key table.
+- `SystemProviderStub`: `adb_enabled` / `development_settings_enabled` report `0` when a profile is active.
+- `BSpoofNetwork`: `NetworkInterface.getNetworkInterfaces()` now filters tunnel interfaces.
+- `IAlarmManagerProxy`: `getTimeZone()` returns the profile timezone (coheres with `TimeZone.getDefault()`).
+- `BSpoofAaid` (new, via `AaidSpoofInjector`): per-identity advertising ID — the cloned GMS would otherwise hand every identity the host's real AAID (stable cross-identity link).
+- Host: `SandboxApp` bakes the installed WebView's real Chrome major into each identity's UA (fixes Chrome/126 claim vs installed 121 skew); `ClientConfiguration.isHideXposed()` now true.
+- Known residuals (documented, not patched): Play Integrity verdicts (unforgeable client-side), shared-UID provability, dataDir paths containing the host package (needs path virtualization — risky), Pine frames in stack traces, sensor/camera/GPU live hardware, `/proc/net/route` + DNS, `Resources.getConfiguration()` locale vs `Locale.getDefault()`.
+- Untested on-device: needs Jason's install + probe run.

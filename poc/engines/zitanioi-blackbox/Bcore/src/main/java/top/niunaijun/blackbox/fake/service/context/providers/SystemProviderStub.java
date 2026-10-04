@@ -66,6 +66,12 @@ public class SystemProviderStub extends ClassInvocationStub implements BContentP
         if (spoofedAndroidId != null) {
             return spoofedAndroidId;
         }
+        // Track F: a dev device with adb/development settings on is itself a
+        // tell. Report them off for guests with an active profile.
+        Object spoofedDevSetting = trySpoofDevSetting(method.getName(), args);
+        if (spoofedDevSetting != null) {
+            return spoofedDevSetting;
+        }
         if (args != null && args.length > 0) {
             Object arg = args[0];
             if (arg instanceof String) {
@@ -120,6 +126,54 @@ public class SystemProviderStub extends ClassInvocationStub implements BContentP
             } else if (arg instanceof String[]) {
                 for (String s : (String[]) arg) {
                     if (Settings.Secure.ANDROID_ID.equals(s)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Returns a spoofed "0" result for developer-mode indicators
+     * ({@code adb_enabled}, {@code development_settings_enabled}) when a
+     * spoof profile is active; null otherwise (caller continues to the
+     * real provider).
+     */
+    private Object trySpoofDevSetting(String methodName, Object[] args) {
+        if (!"query".equals(methodName) && !"call".equals(methodName)) {
+            return null;
+        }
+        BSpoofManager spoof = BSpoofManager.get();
+        if (!spoof.isSpoofActive()) {
+            return null;
+        }
+        if (!isDevSettingRequest(args)) {
+            return null;
+        }
+        if ("call".equals(methodName)) {
+            Bundle result = new Bundle();
+            result.putString("value", "0");
+            return result;
+        }
+        MatrixCursor cursor = new MatrixCursor(new String[]{"name", "value"}, 1);
+        cursor.addRow(new Object[]{"adb_enabled", "0"});
+        return cursor;
+    }
+
+    private boolean isDevSettingRequest(Object[] args) {
+        if (args == null) {
+            return false;
+        }
+        for (Object arg : args) {
+            if (arg instanceof String) {
+                String s = (String) arg;
+                if ("adb_enabled".equals(s) || "development_settings_enabled".equals(s)) {
+                    return true;
+                }
+            } else if (arg instanceof String[]) {
+                for (String s : (String[]) arg) {
+                    if ("adb_enabled".equals(s) || "development_settings_enabled".equals(s)) {
                         return true;
                     }
                 }

@@ -53,6 +53,11 @@ public final class BSpoofSystemProps {
                 Class<?> sp = Class.forName("android.os.SystemProperties");
                 hookGet(sp, new Class<?>[]{String.class});
                 hookGet(sp, new Class<?>[]{String.class, String.class});
+                // Typed overloads: detectors read ro.debuggable/ro.secure
+                // through getInt/getBoolean, which the String hooks never see.
+                hookTypedGet(sp, "getInt", new Class<?>[]{String.class, int.class});
+                hookTypedGet(sp, "getLong", new Class<?>[]{String.class, long.class});
+                hookTypedGet(sp, "getBoolean", new Class<?>[]{String.class, boolean.class});
                 sInstalled = true;
                 Slog.d(TAG, "SystemProperties telephony hooks installed");
             } catch (Throwable t) {
@@ -141,5 +146,58 @@ public final class BSpoofSystemProps {
             }
         }
         return false;
+    }
+
+    /**
+     * Hooks a typed overload ({@code getInt(String,int)},
+     * {@code getLong(String,long)}, {@code getBoolean(String,boolean)}).
+     * Only keys our spoof table covers are rewritten; everything else
+     * passes through to the real implementation.
+     */
+    private static void hookTypedGet(Class<?> sp, final String methodName, Class<?>[] params) {
+        final Method target;
+        try {
+            target = sp.getDeclaredMethod(methodName, params);
+        } catch (Throwable t) {
+            Slog.e(TAG, "SystemProperties." + methodName + " not found; skipping", t);
+            return;
+        }
+        try {
+            Pine.hook(target, new MethodHook() {
+                @Override
+                public void afterCall(Pine.CallFrame callFrame) throws Throwable {
+                    if (callFrame.hasThrowable()) {
+                        return;
+                    }
+                    BSpoofManager spoof = BSpoofManager.get();
+                    if (!spoof.isSpoofActive()) {
+                        return;
+                    }
+                    Object[] args = callFrame.args;
+                    if (args == null || args.length == 0 || !(args[0] instanceof String)) {
+                        return;
+                    }
+                    String spoofed = spoofedValueFor(spoof, (String) args[0]);
+                    if (spoofed == null) {
+                        return;
+                    }
+                    try {
+                        if ("getInt".equals(methodName)) {
+                            callFrame.setResult(Integer.parseInt(spoofed));
+                        } else if ("getLong".equals(methodName)) {
+                            callFrame.setResult(Long.parseLong(spoofed));
+                        } else {
+                            callFrame.setResult("1".equals(spoofed)
+                                    || "true".equalsIgnoreCase(spoofed));
+                        }
+                    } catch (NumberFormatException e) {
+                        // Spoof value isn't numeric for this overload; leave
+                        // the real value rather than crash the caller.
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            Slog.e(TAG, "Pine hook on SystemProperties." + methodName + " failed", t);
+        }
     }
 }

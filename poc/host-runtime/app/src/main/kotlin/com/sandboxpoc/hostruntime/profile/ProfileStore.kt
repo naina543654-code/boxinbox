@@ -23,17 +23,27 @@ object ProfileStore {
     /** Audit copy of the same JSON. */
     const val PROFILE_COPY_NAME = "profile.json"
 
+    /** Per-identity spoofed build.prop; the engine redirects guest reads of /system/build.prop here. */
+    const val BUILD_PROP_NAME = "build.prop"
+
+    /** Per-identity spoofed /proc/version content. */
+    const val PROC_VERSION_NAME = "proc_version"
+
     private fun dir(filesDir: File): File = File(filesDir, DIR_NAME).also { it.mkdirs() }
 
     /**
-     * Writes [profile] to both files (same content). Overwrites any previous
-     * active profile — V1 scope is one active identity.
+     * Writes [profile] to the profile files plus the per-identity procfs
+     * spoof files (build.prop, proc_version) the engine redirects guest
+     * reads to. Overwrites any previous active profile — V1 scope is one
+     * active identity.
      */
     fun saveActive(filesDir: File, profile: SpoofProfile) {
         val d = dir(filesDir)
         val json = profile.toJson()
         File(d, ACTIVE_PROFILE_NAME).writeText(json)
         File(d, PROFILE_COPY_NAME).writeText(json)
+        File(d, BUILD_PROP_NAME).writeText(profile.toBuildProp())
+        File(d, PROC_VERSION_NAME).writeText(profile.toProcVersion())
     }
 
     /** Reads back the active profile, or null if absent/unparseable. */
@@ -43,10 +53,12 @@ object ProfileStore {
         return runCatching { SpoofProfile.fromJson(f.readText()) }.getOrNull()
     }
 
-    /** Removes both profile files. Idempotent — safe to call when absent. */
+    /** Removes the profile and procfs spoof files. Idempotent — safe to call when absent. */
     fun deleteActive(filesDir: File) {
         val d = dir(filesDir)
         File(d, ACTIVE_PROFILE_NAME).delete()
         File(d, PROFILE_COPY_NAME).delete()
+        File(d, BUILD_PROP_NAME).delete()
+        File(d, PROC_VERSION_NAME).delete()
     }
 }

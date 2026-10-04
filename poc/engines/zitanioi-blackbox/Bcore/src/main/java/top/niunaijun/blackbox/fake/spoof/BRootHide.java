@@ -95,6 +95,7 @@ public final class BRootHide {
             try {
                 hookFileExists();
                 hookRuntimeExec();
+                hookProcessBuilder();
                 hookDebuggerState();
                 sInstalled = true;
                 Slog.d(TAG, "root/debugger hiding hooks installed");
@@ -205,6 +206,13 @@ public final class BRootHide {
                             // Same observable behavior as a non-rooted
                             // device: empty output, exit code 1.
                             callFrame.setResult(dummyProcess());
+                        } else {
+                            // getprop bypasses the SystemProperties Java
+                            // hooks; answer identity keys at the exec layer.
+                            Process spoofed = maybeSpoofGetprop(toArgv(args[0]));
+                            if (spoofed != null) {
+                                callFrame.setResult(spoofed);
+                            }
                         }
                     }
                 });
@@ -269,6 +277,210 @@ public final class BRootHide {
             @Override
             public int exitValue() {
                 return 1;
+            }
+
+            @Override
+            public void destroy() {
+            }
+        };
+    }
+
+    /** Tokenizes an exec command argument into argv. */
+    private static String[] toArgv(Object cmd) {
+        if (cmd instanceof String[]) {
+            return (String[]) cmd;
+        }
+        if (cmd instanceof String) {
+            return ((String) cmd).split("[\\s;|&]+");
+        }
+        return null;
+    }
+
+    // ------------------------------------------------------------------
+    // java.lang.ProcessBuilder.start() — bypasses Runtime.exec entirely
+    // ------------------------------------------------------------------
+
+    /**
+     * Hooks {@code ProcessBuilder.start()}: it calls {@code ProcessImpl}
+     * directly and never goes through the hooked {@code Runtime.exec}
+     * overloads, so without this a guest can run {@code su} or
+     * {@code getprop} unfiltered via {@code new ProcessBuilder(...)}.
+     */
+    private static void hookProcessBuilder() {
+        final Method target;
+        try {
+            target = ProcessBuilder.class.getDeclaredMethod("start");
+        } catch (Throwable t) {
+            Slog.e(TAG, "ProcessBuilder.start not found; skipping", t);
+            return;
+        }
+        try {
+            Pine.hook(target, new MethodHook() {
+                @Override
+                public void beforeCall(Pine.CallFrame callFrame) {
+                    if (!BSpoofManager.get().isSpoofActive()) {
+                        return;
+                    }
+                    Object recv = callFrame.thisObject;
+                    if (!(recv instanceof ProcessBuilder)) {
+                        return;
+                    }
+                    java.util.List<String> command;
+                    try {
+                        command = ((ProcessBuilder) recv).command();
+                    } catch (Throwable t) {
+                        return;
+                    }
+                    if (command == null || command.isEmpty()) {
+                        return;
+                    }
+                    String[] argv = command.toArray(new String[0]);
+                    for (String token : argv) {
+                        if (isDangerousExecToken(token)) {
+                            callFrame.setResult(dummyProcess());
+                            return;
+                        }
+                    }
+                    Process spoofed = maybeSpoofGetprop(argv);
+                    if (spoofed != null) {
+                        callFrame.setResult(spoofed);
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            Slog.e(TAG, "Pine hook on ProcessBuilder.start failed", t);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // getprop interception — answers identity properties at the exec layer
+    // ------------------------------------------------------------------
+
+    /**
+     * Intercepts {@code getprop} invocations. {@code Runtime.exec("getprop
+     * …")} and {@code ProcessBuilder("getprop", …)} bypass the Java
+     * {@code SystemProperties} hooks entirely, so without this the guest
+     * reads the host's real {@code ro.build.display.id},
+     * {@code ro.product.model}, etc. straight from the property service.
+     *
+     * @param argv tokenized command line
+     * @return a {@link Process} serving the spoofed answer, or null to let
+     *         the real command run (unknown key / no active profile).
+     */
+    static Process maybeSpoofGetprop(String[] argv) {
+        if (argv == null || argv.length == 0) {
+            return null;
+        }
+        String bin = argv[0];
+        if (bin == null || !(bin.equals("getprop") || bin.endsWith("/getprop"))) {
+            return null;
+        }
+        BSpoofManager spoof = BSpoofManager.get();
+        if (!spoof.isSpoofActive()) {
+            return null;
+        }
+        try {
+            if (argv.length == 1) {
+                // Bare `getprop`: dump the spoofed build.prop in getprop
+                // output format. The file read itself goes through the
+                // /system/build.prop redirect installed by BProcFsSpoof.
+                String dump = readSpoofedBuildProp();
+                if (dump != null) {
+                    return textProcess(formatGetpropDump(dump));
+                }
+                return null;
+            }
+            String key = argv[1];
+            String value = spoof.getSystemPropertySpoof(key);
+            if (value != null) {
+                return textProcess(value + "\n");
+            }
+            // Unknown key: `getprop <key> <default>` prints the default.
+            if (argv.length >= 3) {
+                return textProcess(argv[2] + "\n");
+            }
+        } catch (Throwable t) {
+            Slog.w(TAG, "getprop spoof failed; passing through", t);
+        }
+        return null;
+    }
+
+    private static String readSpoofedBuildProp() {
+        java.io.File prop = new java.io.File("/system/build.prop");
+        if (!prop.isFile()) {
+            return null;
+        }
+        try {
+            java.io.InputStream in = new java.io.FileInputStream(prop);
+            try {
+                java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+                byte[] buf = new byte[8192];
+                int read;
+                while ((read = in.read(buf)) != -1) {
+                    out.write(buf, 0, read);
+                }
+                return new String(out.toByteArray(), "UTF-8");
+            } finally {
+                try {
+                    in.close();
+                } catch (Throwable ignored) {
+                }
+            }
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** Converts {@code key=value} lines to getprop's {@code [key]: [value]} format. */
+    private static String formatGetpropDump(String buildProp) {
+        StringBuilder out = new StringBuilder(buildProp.length() + 256);
+        for (String line : buildProp.split("\n")) {
+            line = line.trim();
+            if (line.isEmpty() || line.startsWith("#")) {
+                continue;
+            }
+            int eq = line.indexOf('=');
+            if (eq <= 0) {
+                continue;
+            }
+            out.append('[').append(line.substring(0, eq).trim()).append("]: [")
+                    .append(line.substring(eq + 1).trim()).append("]\n");
+        }
+        return out.toString();
+    }
+
+    /** A Process serving fixed text on stdout, exit code 0. */
+    private static Process textProcess(final String text) {
+        final byte[] bytes;
+        try {
+            bytes = text.getBytes("UTF-8");
+        } catch (Throwable t) {
+            return dummyProcess();
+        }
+        return new Process() {
+            @Override
+            public OutputStream getOutputStream() {
+                return new ByteArrayOutputStream();
+            }
+
+            @Override
+            public InputStream getInputStream() {
+                return new ByteArrayInputStream(bytes);
+            }
+
+            @Override
+            public InputStream getErrorStream() {
+                return new ByteArrayInputStream(new byte[0]);
+            }
+
+            @Override
+            public int waitFor() {
+                return 0;
+            }
+
+            @Override
+            public int exitValue() {
+                return 0;
             }
 
             @Override

@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import top.niunaijun.blackbox.BlackBoxCore;
 import top.niunaijun.blackbox.utils.Slog;
@@ -120,6 +121,9 @@ public class BSpoofManager {
     private final Map<String, String> mVersionFields = new HashMap<>();
     private String mAndroidId;
     private String mKernelVersion;
+    /** Profile Android version string ("13") and API level (33), for ro.build.version.* answers. */
+    private String mVersionRelease;
+    private int mApiLevel;
 
     /** Fixed Build.VERSION identity constants for release builds. */
     private static final String VERSION_CODENAME = "REL";
@@ -311,6 +315,69 @@ public class BSpoofManager {
         return mSpoofActive ? mWebViewUa : null;
     }
 
+    /**
+     * Per-identity advertising ID, stable within an identity and different
+     * across identities. The cloned GMS would otherwise hand every guest
+     * the host's real AAID — a cross-identity link. Derived deterministically
+     * from the identity's own Android ID so it survives process restarts.
+     */
+    public String getAdvertisingId() {
+        ensureLoaded();
+        if (!mSpoofActive || mAndroidId == null) {
+            return null;
+        }
+        return UUID.nameUUIDFromBytes(("aaid-" + mAndroidId).getBytes()).toString();
+    }
+
+    /**
+     * Spoofed value for an {@code ro.*} system-property key, or null to pass
+     * through. Used by the {@code getprop} exec interception in
+     * {@link BRootHide}: {@code Runtime.exec("getprop …")} and
+     * {@code ProcessBuilder("getprop", …)} bypass the Java
+     * {@code SystemProperties} hooks entirely, so the property table has to
+     * be answered at the exec layer too.
+     */
+    public String getSystemPropertySpoof(String key) {
+        ensureLoaded();
+        if (!mSpoofActive || key == null) {
+            return null;
+        }
+        switch (key) {
+            case "ro.product.manufacturer": return mBuildFields.get("MANUFACTURER");
+            case "ro.product.brand": return mBuildFields.get("BRAND");
+            case "ro.product.model": return mBuildFields.get("MODEL");
+            case "ro.product.device": return mBuildFields.get("DEVICE");
+            case "ro.product.name": return mBuildFields.get("PRODUCT");
+            case "ro.product.board": return mBuildFields.get("BOARD");
+            case "ro.build.display.id": return mBuildFields.get("DISPLAY");
+            case "ro.build.id": return mBuildFields.get("ID");
+            case "ro.build.version.incremental": return mVersionFields.get("INCREMENTAL");
+            case "ro.build.version.security_patch": return mVersionFields.get("SECURITY_PATCH");
+            case "ro.build.version.release": {
+                String v = mBuildFields.get("VERSION_RELEASE");
+                return v != null ? v : mVersionRelease;
+            }
+            case "ro.build.version.sdk": {
+                String v = mBuildFields.get("VERSION_SDK");
+                return v != null ? v : String.valueOf(mApiLevel);
+            }
+            case "ro.build.date.utc": {
+                Long t = mBuildLongFields.get("TIME");
+                return t != null ? String.valueOf(t / 1000L) : null;
+            }
+            case "ro.build.user": return mBuildFields.get("USER");
+            case "ro.build.host": return mBuildFields.get("HOST");
+            case "ro.build.tags": return mBuildFields.get("TAGS");
+            case "ro.build.type": return mBuildFields.get("TYPE");
+            case "ro.build.fingerprint": return mBuildFields.get("FINGERPRINT");
+            case "ro.soc.manufacturer": return mBuildFields.get("SOC_MANUFACTURER");
+            case "ro.soc.model": return mBuildFields.get("SOC_MODEL");
+            case "ro.debuggable": return "0";
+            case "ro.secure": return "1";
+            default: return null;
+        }
+    }
+
     public String getOperatorName() {
         ensureLoaded();
         return mSpoofActive ? mOperatorName : null;
@@ -469,6 +536,13 @@ public class BSpoofManager {
             mSpoofActive = true;
             Slog.d(TAG, "ensureLoaded: spoof profile active: "
                     + root.optString("profileId", "<unknown>"));
+            // Procfs/build.prop tells bypass every Java hook; hide them via
+            // the IO redirect table now that the profile is active.
+            try {
+                BProcFsSpoof.install(dataDir + "/files");
+            } catch (Throwable t) {
+                Slog.w(TAG, "ensureLoaded: BProcFsSpoof failed (fail-open)", t);
+            }
         } catch (Throwable t) {
             Slog.w(TAG, "ensureLoaded: failed to parse spoof profile — spoofing inactive (will retry)", t);
             mSpoofActive = false;
@@ -512,6 +586,8 @@ public class BSpoofManager {
             if (ua != null && !ua.isEmpty()) {
                 mWebViewUa = ua;
             }
+            mVersionRelease = device.optString("androidVersion", null);
+            mApiLevel = device.optInt("apiLevel", 0);
         }
 
         mAndroidId = root.optString("androidId", null);

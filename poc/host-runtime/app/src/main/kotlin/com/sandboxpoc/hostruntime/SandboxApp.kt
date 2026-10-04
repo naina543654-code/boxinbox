@@ -5,6 +5,7 @@ import android.content.Context
 import android.util.Log
 import com.sandboxpoc.hostruntime.capability.CapabilityManager
 import com.sandboxpoc.hostruntime.identity.IdentityManager
+import com.sandboxpoc.hostruntime.profile.webViewChromeMajor
 import com.sandboxpoc.hostruntime.runtime.BlackBoxRuntime
 import com.sandboxpoc.hostruntime.runtime.SandboxRuntime
 import com.sandboxpoc.hostruntime.storage.StorageManager
@@ -42,6 +43,10 @@ class SandboxApp : Application() {
         try {
             BlackBoxCore.get().doAttachBaseContext(base, object : ClientConfiguration() {
                 override fun getHostPackageName(): String = base.packageName
+                // Hide Xposed-framework classes from guest classloader scans
+                // (VMClassLoader.findLoadedClass). The /proc/self/maps tell is
+                // handled separately via the BProcFsSpoof redirect.
+                override fun isHideXposed(): Boolean = true
             })
         } catch (e: Exception) {
             // Engine init failure must never kill the host app silently;
@@ -61,6 +66,16 @@ class SandboxApp : Application() {
         log = EventLog(storage)
         capabilities = CapabilityManager()
         runtime = BlackBoxRuntime()
+        // Bake the installed WebView's real Chrome major version into
+        // generated identities so the spoofed UA never claims a newer
+        // Chrome than the WebView package actually installed.
+        try {
+            val vi = packageManager.getPackageInfo("com.google.android.webview", 0)
+            val major = vi.versionName?.substringBefore('.')
+            if (!major.isNullOrEmpty() && major.all { it.isDigit() }) {
+                webViewChromeMajor = major
+            }
+        } catch (_: Exception) { }
         identities = IdentityManager(storage, runtime, log, filesDir)
         val engineOk = try {
             BlackBoxCore.get().getUsers()
