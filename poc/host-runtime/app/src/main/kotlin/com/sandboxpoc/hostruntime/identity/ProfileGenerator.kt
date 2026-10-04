@@ -13,6 +13,7 @@ import com.sandboxpoc.hostruntime.profile.buildWebViewUa
 import com.sandboxpoc.hostruntime.profile.timezoneFor
 import com.sandboxpoc.hostruntime.profile.localeFor
 import com.sandboxpoc.hostruntime.profile.newLocalMac
+import com.sandboxpoc.hostruntime.profile.newPhoneNumber
 import com.sandboxpoc.hostruntime.profile.newSimSerial
 import java.security.SecureRandom
 import java.util.UUID
