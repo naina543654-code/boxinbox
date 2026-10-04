@@ -63,6 +63,7 @@ public final class BSpoofOsIdentity {
             hookBondedDevices();
             hookWlan0Mac();
             hookWebViewUa();
+            hookBuildSerial();
             sInstalled = true;
         }
     }
@@ -236,6 +237,35 @@ public final class BSpoofOsIdentity {
             });
         } catch (Throwable t) {
             Slog.e(TAG, "Pine hook on WebSettings.getDefaultUserAgent() failed", t);
+        }
+    }
+
+    /**
+     * R3 audit 2026-10-05: defense-in-depth Pine hook on
+     * {@code Build.getSerial()}. The binder path is covered by
+     * {@code IDeviceIdentifiersPolicyProxy}, but hooking the public API
+     * directly closes any framework-internal bypass. Fail-closed: the
+     * per-identity serial when active, null when inactive (a null serial
+     * is plausible; the real hardware serial is a permanent link).
+     */
+    private static void hookBuildSerial() {
+        try {
+            Pine.hook(android.os.Build.class.getDeclaredMethod("getSerial"),
+                    new MethodHook() {
+                        @Override
+                        public void beforeCall(Pine.CallFrame callFrame) {
+                            BSpoofManager spoof = BSpoofManager.get();
+                            if (spoof == null || !spoof.isSpoofActive()) {
+                                return;
+                            }
+                            String serial = spoof.getSerial();
+                            // Fail closed even when the profile lacks the
+                            // field — setResult(null) overrides the real.
+                            callFrame.setResult(serial);
+                        }
+                    });
+        } catch (Throwable t) {
+            Slog.e(TAG, "Pine hook on Build.getSerial() failed", t);
         }
     }
 

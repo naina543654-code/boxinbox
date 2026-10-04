@@ -339,12 +339,19 @@ public class BAccountManager extends BlackManager<IBAccountManagerService> {
      * (the other methods bind BActivityThread.getUserId(), which is wrong in
      * the host process). Drops every account for the virtual user from the
      * daemon's in-memory map and persists the change.
+     *
+     * <p>R3 audit 2026-10-05: returns success instead of swallowing the
+     * RemoteException — the host wipe must be able to tell "daemon map
+     * cleared" from "IPC failed, accounts may still be live".
      */
-    public void clearAccountsForUser(int userId) {
+    public boolean clearAccountsForUser(int userId) {
         try {
             getService().clearAccountsForUser(userId);
+            return true;
         } catch (RemoteException e) {
-            e.printStackTrace();
+            android.util.Log.e("BAccountManager",
+                    "clearAccountsForUser(" + userId + ") failed", e);
+            return false;
         }
     }
 }

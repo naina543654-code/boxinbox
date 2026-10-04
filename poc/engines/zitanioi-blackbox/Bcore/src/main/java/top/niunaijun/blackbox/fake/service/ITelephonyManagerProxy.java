@@ -107,6 +107,49 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         }
     }
 
+    /**
+     * R3 audit 2026-10-05: {@code getPrimaryImei} (ITelephony.aidl) returns
+     * the real IMEI via direct binder and has no public-API equivalent —
+     * the Pine hooks can't reach it. Same treatment as the other IMEI paths.
+     */
+    @ProxyMethod("getPrimaryImei")
+    public static class GetPrimaryImei extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return spoofedOrLegacyDeviceId();
+        }
+    }
+
+    /**
+     * R3 audit 2026-10-05: CDMA number identifiers. Serve the per-identity
+     * MSISDN when active; null when inactive (fail-closed — a null MDN/MIN
+     * is plausible, the real SIM's number is a cross-identity link).
+     */
+    @ProxyMethods({"getCdmaMdn", "getCdmaMin"})
+    public static class GetCdmaMdnMin extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            BSpoofManager spoof = BSpoofManager.get();
+            if (spoof.isSpoofActive() && spoof.getPhoneNumber() != null) {
+                return spoof.getPhoneNumber();
+            }
+            return null;
+        }
+    }
+
+    /**
+     * R3 audit 2026-10-05: merged-subscription IMSI arrays — stable
+     * cross-identity links via direct binder. Null = no merged
+     * subscriptions, the normal state.
+     */
+    @ProxyMethods({"getMergedSubscriberIds", "getMergedImsisFromGroup"})
+    public static class GetMergedSubscriberIds extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return null;
+        }
+    }
+
     @ProxyMethod("isUserDataEnabled")
     public static class IsUserDataEnabled extends MethodHook {
         @Override
@@ -322,7 +365,11 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         }
     }
 
-    @ProxyMethods({"getNetworkType", "getVoiceNetworkTypeForSubscriber"})
+    // R3 audit 2026-10-05: the "getNetworkType" name never existed on
+    // ITelephony (dead hook); the real AIDL method is
+    // getNetworkTypeForSubscriber. Both names route to the per-identity
+    // network type here.
+    @ProxyMethods({"getNetworkTypeForSubscriber", "getVoiceNetworkTypeForSubscriber"})
     public static class GetVoiceNetworkType extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {

@@ -11,6 +11,55 @@ see `poc/SPOOFING_MATRIX.md` for the verification matrix.
 
 ## Unreleased (on `main` since `poc-v2.2`)
 
+- R3 audit fix batch (2026-10-05, sources TBD — third full code audit,
+  `files/CODE-AUDIT-R3-2026-10-05.md`: 62 OK / 1 partial / 0 broken of
+  63 matrix rows; 16/19 batch items verified, 3 flawed; 1 critical
+  regression found and fixed).
+  - CRITICAL: `getPrivilegedConfiguredNetworks` returned a raw `ArrayList`
+    where the AIDL declares `ParceledListSlice` — the review batch had
+    reintroduced the exact R2 crash class. Now shares the
+    `newParceledListSlice()` reflection helper with `getConfiguredNetworks`.
+  - HIGH: `ITelephony.getPrimaryImei` hooked → spoofed device ID (real IMEI
+    was reachable via direct binder; no public-API equivalent).
+  - HIGH: `ITelephony.getCdmaMdn`/`getCdmaMin` hooked → per-identity MSISDN
+    (fail-closed null when inactive).
+  - MEDIUM: `ITelephony.getMergedSubscriberIds`/`getMergedImsisFromGroup` →
+    null (merged IMSI arrays were a direct-binder link).
+  - MEDIUM: fixed the dead `getNetworkType` binder name → real
+    `getNetworkTypeForSubscriber`, plus a Pine hook on public
+    `TelephonyManager.getNetworkType()` (permissionless, was serving the
+    real value).
+  - MEDIUM: `ServiceState.getOperatorAlphaLong/Short/Numeric` Pine-hooked →
+    per-identity operator (fail-closed when active) — `ServiceState`
+    operator fields bypassed the `TelephonyManager` getters.
+  - MEDIUM: `SystemProviderStub.extractProjection` was reading the wrong arg
+    (Uri) at the `IContentProvider` interception level — now anchors on the
+    Uri and handles both the API 30 and API 31+ arg layouts.
+  - MEDIUM: `IDeviceIdentifiersPolicyService.getSerial()` (no-arg) hooked →
+    per-identity serial (was a direct-binder serial bypass).
+  - MEDIUM: `SubscriptionInfo.getCardString()` hooked → per-identity ICCID
+    (it IS the ICCID/EID, not a display string).
+  - MEDIUM: `IWifiManager.getWifiConfigsForPasspointProfiles` hooked → empty
+    container matching the AIDL return type (adaptive: slice or list).
+  - MEDIUM: operator/country-ISO Pine hooks now fail closed when a profile
+    is active but the field is missing (were falling through to real values).
+  - LOW: `ro.boot.serialno` added to the host-generated `build.prop`.
+  - LOW: Pine hook on `Build.getSerial()` → per-identity serial
+    (defense-in-depth over the binder proxy).
+  - LOW: ISIM `getIsimImpu`/`getImsPublicUserIdentities` return empty
+    array/list instead of null (guest NPE risk on IMS paths).
+  - LOW: `BAccountManager.clearAccountsForUser` now returns boolean; the host
+    wipe trace distinguishes daemon-clear success from IPC failure.
+  - LOW: `getDeviceSvn`/`getDeviceSvnUsingSubId` → null (was serving the full
+    IMEI as the software version — implausible shape).
+  - LOW: `getCardId` derivation masks the sign bit instead of `Math.abs`
+    (`Integer.MIN_VALUE` stayed negative).
+  - LOW: device-ID Pine hooks (`getImei`/`getMeid`/`getDeviceId`) now return
+    null when the guest lacks `READ_PRIVILEGED_PHONE_STATE`, matching
+    API 29+ framework behavior (was a behavioral tell).
+  - Matrix doc corrections: fixed malformed row 77, corrected the SIM-serial
+    and inactive-fallback rows, added the saved-networks row, refreshed the
+    file map, documented the new Pine hooks.
 - Code review pass (2026-10-05, sources `add1897`): swept the engine for
   remaining direct-binder and public-API gaps after the re-audit batches.
   - `IPhoneSubInfo`: hooked the bare deprecated variants `getDeviceSvn`,

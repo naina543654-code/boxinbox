@@ -57,4 +57,22 @@ public class IDeviceIdentifiersPolicyProxy extends BinderInvocationStub {
             return Md5Utils.md5(BlackBoxCore.getHostPkg());
         }
     }
+
+    /**
+     * R3 audit 2026-10-05: the no-arg {@code getSerial()} (AIDL line 40) was
+     * unhooked — a direct-binder caller bypasses the {@code getSerialForPackage}
+     * hook above and reads the real hardware serial. Same treatment.
+     */
+    @ProxyMethod("getSerial")
+    public static class GetSerial extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            top.niunaijun.blackbox.fake.spoof.BSpoofManager spoof =
+                    top.niunaijun.blackbox.fake.spoof.BSpoofManager.get();
+            if (spoof.isSpoofActive() && spoof.getSerial() != null) {
+                return spoof.getSerial();
+            }
+            return Md5Utils.md5(BlackBoxCore.getHostPkg());
+        }
+    }
 }

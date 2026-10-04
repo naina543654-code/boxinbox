@@ -444,7 +444,14 @@ class BlackBoxRuntime : SandboxRuntime {
                 top.niunaijun.blackbox.fake.frameworks.BAccountManager.get()
                     .clearAccountsForUser(VIRTUAL_USER_ID)
             }
-        }.onSuccess { trace("phase=clear-accounts: end (daemon account map cleared)") }
+        }.onSuccess { cleared ->
+            // R3 audit 2026-10-05: the wrapper used to swallow RemoteException
+            // and always report success — now it returns false on IPC failure
+            // so a failed daemon clear is visible in the wipe trace.
+            if (cleared == true) trace("phase=clear-accounts: end (daemon account map cleared)")
+            else trace("phase=clear-accounts: FAILED (daemon IPC failed); " +
+                "continuing — disk wipe still removes accounts.conf")
+        }
             .onFailure {
                 trace("phase=clear-accounts: FAILED (${it.message}); " +
                     "continuing — disk wipe still removes accounts.conf")

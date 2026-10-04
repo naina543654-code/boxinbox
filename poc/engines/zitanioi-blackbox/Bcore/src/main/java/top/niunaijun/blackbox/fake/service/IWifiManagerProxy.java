@@ -47,6 +47,30 @@ public class IWifiManagerProxy extends BinderInvocationStub {
         return false;
     }
 
+    /**
+     * Builds an empty {@code android.content.pm.ParceledListSlice} via
+     * reflection (the class is @hide, absent from android.jar, but present
+     * on every device). Returns null if construction fails, in which case
+     * callers fall back to the real implementation rather than crashing
+     * the guest.
+     *
+     * <p>R3 audit 2026-10-05: {@code getPrivilegedConfiguredNetworks}
+     * declares {@code ParceledListSlice} too (AOSP IWifiManager.aidl) — the
+     * review batch wrongly assumed a plain List and reintroduced the
+     * ClassCastException crash class. Both slice-returning hooks share this.
+     */
+    static Object newParceledListSlice() {
+        try {
+            Class<?> sliceClass =
+                    Class.forName("android.content.pm.ParceledListSlice");
+            return sliceClass.getConstructor(java.util.List.class)
+                    .newInstance(new ArrayList<>());
+        } catch (Throwable t) {
+            Log.w(TAG, "ParceledListSlice reflection failed", t);
+            return null;
+        }
+    }
+
     @ProxyMethod("getScanResults")
     public static class GetScanResults extends MethodHook {
         /**
@@ -89,25 +113,6 @@ public class IWifiManagerProxy extends BinderInvocationStub {
             }
             return method.invoke(who, args);
         }
-
-        /**
-         * Builds an empty {@code android.content.pm.ParceledListSlice} via
-         * reflection (the class is @hide, absent from android.jar, but
-         * present on every device). Returns null if construction fails, in
-         * which case the caller falls back to the real implementation
-         * rather than crashing the guest.
-         */
-        private static Object newParceledListSlice() {
-            try {
-                Class<?> sliceClass =
-                        Class.forName("android.content.pm.ParceledListSlice");
-                return sliceClass.getConstructor(java.util.List.class)
-                        .newInstance(new ArrayList<>());
-            } catch (Throwable t) {
-                Log.w(TAG, "ParceledListSlice reflection failed", t);
-                return null;
-            }
-        }
     }
 
     @ProxyMethod("getPasspointConfigurations")
@@ -133,15 +138,52 @@ public class IWifiManagerProxy extends BinderInvocationStub {
     public static class GetPrivilegedConfiguredNetworks extends MethodHook {
         /**
          * Review 2026-10-05: the privileged variant of getConfiguredNetworks
-         * (API 33+, NETWORK_SETTINGS-gated) was still open — same saved-SSID
-         * leak, same fix. AIDL declares a plain List<WifiConfiguration>
-         * (the public API returns it directly with no slice unwrapping).
+         * (API 33+, NETWORK_SETTINGS-gated). R3 audit 2026-10-05: the AIDL
+         * declares {@code ParceledListSlice} here too — the first version of
+         * this hook returned a raw ArrayList and reintroduced the
+         * ClassCastException crash. Reuses the shared slice helper.
          */
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             if (BSpoofManager.get().isSpoofActive()) {
-                Log.d(TAG, "getPrivilegedConfiguredNetworks: spoofed -> empty");
-                return new ArrayList<>();
+                Log.d(TAG, "getPrivilegedConfiguredNetworks: spoofed -> empty slice");
+                Object slice = IWifiManagerProxy.newParceledListSlice();
+                if (slice != null) {
+                    return slice;
+                }
+            }
+            return method.invoke(who, args);
+        }
+    }
+
+    @ProxyMethod("getWifiConfigsForPasspointProfiles")
+    public static class GetWifiConfigsForPasspointProfiles extends MethodHook {
+        /**
+         * R3 audit 2026-10-05: saved WifiConfigurations backing Passpoint
+         * profiles — same leak class as the other saved-network hooks.
+         *
+         * <p>Return-type safety (lesson of R3-1): the exact AIDL return type
+         * for this method could not be re-verified against AOSP here, so the
+         * hook inspects the interface method's declared return type at
+         * runtime and returns the matching empty container — an empty
+         * {@code ParceledListSlice} when the AIDL declares the slice (as
+         * {@code getConfiguredNetworks} does), a plain empty list otherwise.
+         * Either way the guest gets "no saved passpoint configs" with no
+         * ClassCastException. Inactive profile -> pass through.
+         */
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            if (BSpoofManager.get().isSpoofActive()) {
+                Log.d(TAG, "getWifiConfigsForPasspointProfiles: spoofed -> empty");
+                if (method.getReturnType().getName()
+                        .equals("android.content.pm.ParceledListSlice")) {
+                    Object slice = IWifiManagerProxy.newParceledListSlice();
+                    if (slice != null) {
+                        return slice;
+                    }
+                } else {
+                    return new ArrayList<>();
+                }
             }
             return method.invoke(who, args);
         }

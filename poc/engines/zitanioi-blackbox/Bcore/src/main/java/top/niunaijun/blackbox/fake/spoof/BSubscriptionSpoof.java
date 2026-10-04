@@ -72,6 +72,10 @@ public final class BSubscriptionSpoof {
                         new Class<?>[]{int.class, int.class});
                 hookInfoGetter("getNumber", true);
                 hookInfoGetter("getIccId", false);
+                // R3 audit 2026-10-05: getCardString() is the ICCID (or EID)
+                // of the SIM — same stable identifier as getIccId(), via an
+                // alternate getter. Serve the per-identity ICCID.
+                hookInfoGetter("getCardString", false);
                 hookInfoGetter("getGroupUuid", false, true);
                 hookInfoCardId();
                 sInstalled = true;
@@ -201,7 +205,10 @@ public final class BSubscriptionSpoof {
                 public void beforeCall(Pine.CallFrame callFrame) {
                     BSpoofManager spoof = BSpoofManager.get();
                     String seed = spoof.isSpoofActive() ? spoof.getAndroidId() : "inactive";
-                    int fake = Math.abs(("cardid-" + seed).hashCode());
+                    // R3 audit 2026-10-05: Math.abs(Integer.MIN_VALUE) stays
+                    // negative — mask the sign bit instead so the cardId is
+                    // always non-negative.
+                    int fake = ("cardid-" + seed).hashCode() & Integer.MAX_VALUE;
                     callFrame.setResult(fake);
                 }
             });

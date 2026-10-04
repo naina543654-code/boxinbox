@@ -68,6 +68,18 @@ public final class BTelephonyApiSpoof {
                 hookCountryIsoGetter("getSimCountryIso", new Class<?>[]{int.class});
                 hookCountryIsoGetter("getNetworkCountryIso", new Class<?>[0]);
                 hookCountryIsoGetter("getNetworkCountryIso", new Class<?>[]{int.class});
+                // R3 audit 2026-10-05: ServiceState carries its own operator
+                // fields (alpha long/short, numeric) that bypass the
+                // TelephonyManager Pine getters — a guest reading
+                // getServiceState() sees the real operator. Hook the
+                // ServiceState getters directly (lower layer, covers every
+                // path that produces a ServiceState).
+                hookServiceStateOperator();
+                // R3 audit 2026-10-05: public getNetworkType() is
+                // permissionless and was served the real value (the binder
+                // hook name was dead). Belt-and-suspenders Pine hook at the
+                // public API alongside the fixed binder hook.
+                hookNetworkType();
                 // Line-1 (MSISDN) number: the ITelephony binder hook above
                 // covers the service path, but hook the public API too — the
                 // operator getters proved these TelephonyManager methods can
@@ -130,10 +142,13 @@ public final class BTelephonyApiSpoof {
                     if (!spoof.isSpoofActive()) {
                         return;
                     }
-                    String value = numeric ? spoof.getOperatorNumeric() : spoof.getOperatorName();
-                    if (value != null) {
-                        callFrame.setResult(value);
-                    }
+                    // R3 audit 2026-10-05: fail closed. An active profile
+                    // always overrides — even when the field is missing (a
+                    // null/empty operator is plausible; the real operator is
+                    // a cross-identity link). Previously fell through to the
+                    // real value when the profile lacked the field.
+                    callFrame.setResult(numeric
+                            ? spoof.getOperatorNumeric() : spoof.getOperatorName());
                 }
             });
         } catch (Throwable t) {
@@ -144,6 +159,77 @@ public final class BTelephonyApiSpoof {
     /** Hooks {@code TelephonyManager.getLine1Number()} to the per-identity MSISDN. */
     private static void hookLine1Number() {
         hookStringGetter("getLine1Number", new Class<?>[0], ValueKind.PHONE_NUMBER);
+    }
+
+    /**
+     * R3 audit 2026-10-05: hooks the {@code ServiceState} operator getters
+     * to the per-identity operator. Fail-closed when a profile is active
+     * (null when the profile lacks the field); inactive profile passes
+     * through, matching the sibling operator hooks.
+     */
+    private static void hookServiceStateOperator() {
+        hookServiceStateGetter("getOperatorAlphaLong", false);
+        hookServiceStateGetter("getOperatorAlphaShort", false);
+        hookServiceStateGetter("getOperatorNumeric", true);
+    }
+
+    private static void hookServiceStateGetter(String name, final boolean numeric) {
+        final Method target;
+        try {
+            target = android.telephony.ServiceState.class.getDeclaredMethod(name);
+        } catch (Throwable t) {
+            Slog.e(TAG, "ServiceState." + name + " not found; skipping", t);
+            return;
+        }
+        try {
+            Pine.hook(target, new MethodHook() {
+                @Override
+                public void beforeCall(Pine.CallFrame callFrame) {
+                    BSpoofManager spoof = BSpoofManager.get();
+                    if (!spoof.isSpoofActive()) {
+                        return;
+                    }
+                    // Fail closed: active profile always overrides, even
+                    // when the field is missing (null is plausible).
+                    callFrame.setResult(numeric
+                            ? spoof.getOperatorNumeric() : spoof.getOperatorName());
+                }
+            });
+        } catch (Throwable t) {
+            Slog.e(TAG, "Pine hook on ServiceState." + name + " failed", t);
+        }
+    }
+
+    /**
+     * R3 audit 2026-10-05: {@code TelephonyManager.getNetworkType()} is
+     * permissionless. Serves the per-identity network type when active;
+     * inactive profile passes through (matches the binder hook shape).
+     */
+    private static void hookNetworkType() {
+        final Method target;
+        try {
+            target = TelephonyManager.class.getDeclaredMethod("getNetworkType");
+        } catch (Throwable t) {
+            Slog.e(TAG, "TelephonyManager.getNetworkType not found; skipping", t);
+            return;
+        }
+        try {
+            Pine.hook(target, new MethodHook() {
+                @Override
+                public void beforeCall(Pine.CallFrame callFrame) {
+                    BSpoofManager spoof = BSpoofManager.get();
+                    if (!spoof.isSpoofActive()) {
+                        return;
+                    }
+                    int nt = spoof.getNetworkType();
+                    if (nt >= 0) {
+                        callFrame.setResult(nt);
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            Slog.e(TAG, "Pine hook on TelephonyManager.getNetworkType failed", t);
+        }
     }
 
     /**
@@ -167,10 +253,8 @@ public final class BTelephonyApiSpoof {
                     if (!spoof.isSpoofActive()) {
                         return;
                     }
-                    String value = spoof.getCountryIso();
-                    if (value != null) {
-                        callFrame.setResult(value);
-                    }
+                    // R3 audit 2026-10-05: fail closed — see hookOperatorGetter.
+                    callFrame.setResult(spoof.getCountryIso());
                 }
             });
         } catch (Throwable t) {
@@ -231,7 +315,16 @@ public final class BTelephonyApiSpoof {
                             break;
                         case DEVICE_ID:
                         default:
-                            if (spoof.isSpoofActive() && spoof.getTelephonyDeviceId() != null) {
+                            if (!hasPrivilegedPhoneState()) {
+                                // R3 audit 2026-10-05: on API 29+ a real
+                                // device returns null here without
+                                // READ_PRIVILEGED_PHONE_STATE. Serving the
+                                // spoofed IMEI anyway is a behavioral tell —
+                                // fail closed to null, matching the framework.
+                                value = null;
+                                failClosedNull = true;
+                            } else if (spoof.isSpoofActive()
+                                    && spoof.getTelephonyDeviceId() != null) {
                                 value = spoof.getTelephonyDeviceId();
                             } else {
                                 value = md5HostPkg();
@@ -255,5 +348,39 @@ public final class BTelephonyApiSpoof {
         } catch (Throwable t) {
             return "000000000000000";
         }
+    }
+
+    /**
+     * R3 audit 2026-10-05: whether the guest package holds
+     * {@code READ_PRIVILEGED_PHONE_STATE}. Cached per process (install-time
+     * permission; never changes at runtime for normal apps). On failure the
+     * check assumes granted — serving the spoofed value (the old behavior)
+     * is preferable to wrongly nulling a privileged caller.
+     */
+    private static volatile Boolean sHasPrivilegedPhoneState;
+
+    private static boolean hasPrivilegedPhoneState() {
+        Boolean cached = sHasPrivilegedPhoneState;
+        if (cached != null) {
+            return cached;
+        }
+        boolean granted = true;
+        try {
+            android.content.Context ctx =
+                    top.niunaijun.blackbox.BlackBoxCore.getContext();
+            String pkg = top.niunaijun.blackbox.app.BActivityThread.getAppPackageName();
+            if (ctx != null && pkg != null) {
+                // Literal: android.Manifest.permission.READ_PRIVILEGED_PHONE_STATE
+                // — the constant is missing from the compile SDK's android.jar
+                // stubs, but the framework string is stable.
+                granted = ctx.getPackageManager().checkPermission(
+                        "android.permission.READ_PRIVILEGED_PHONE_STATE",
+                        pkg) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            }
+        } catch (Throwable t) {
+            Slog.w(TAG, "privileged-permission check failed; assuming granted", t);
+        }
+        sHasPrivilegedPhoneState = granted;
+        return granted;
     }
 }

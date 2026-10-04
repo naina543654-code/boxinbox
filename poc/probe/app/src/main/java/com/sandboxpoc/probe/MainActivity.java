@@ -1110,6 +1110,64 @@ public class MainActivity extends Activity {
                 oSim == null ? "UNREADABLE" : err, false);
         cmpTeleField("telephony.line1Number", opt(tel, "phoneNumber"), oLine1,
                 oLine1 == null ? "UNREADABLE" : err, false);
+        // R3 audit 2026-10-05: SIM-operator getters now have Pine hooks
+        // (defense-in-depth over the binder proxy). Same expectations as the
+        // network-operator rows — the profile's operator is the SIM's.
+        String oSimOp = null;
+        String oSimOpName = null;
+        String oSimIso = null;
+        try {
+            if (err == null) {
+                TelephonyManager tm2 =
+                        (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+                if (tm2 != null) {
+                    oSimOp = emptyToNull(tm2.getSimOperator());
+                    oSimOpName = emptyToNull(tm2.getSimOperatorName());
+                    oSimIso = emptyToNull(tm2.getSimCountryIso());
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        cmpTeleField("telephony.simOperator", eNum, oSimOp, err, false);
+        cmpTeleField("telephony.simOperatorName", eName, oSimOpName, err, true);
+        cmpTeleField("telephony.simCountryIso", eIso, oSimIso, err, true);
+        // R3 audit 2026-10-05: getNai() is Pine-hooked to fail-closed null.
+        // PASS when null (or SecurityException — also "no NAI leaked");
+        // FAIL on any non-null string.
+        String oNai = null;
+        boolean naiDenied = false;
+        try {
+            if (err == null) {
+                TelephonyManager tm3 =
+                        (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+                if (tm3 != null) {
+                    oNai = tm3.getNai();
+                }
+            }
+        } catch (SecurityException se) {
+            naiDenied = true;
+        } catch (Exception ignored) {
+        }
+        if (err != null) {
+            cmpRow("telephony.nai", null, err, Cmp.UNKNOWN);
+        } else if (oNai == null || naiDenied) {
+            cmpRow("telephony.nai", null, naiDenied ? "SecurityException" : null, Cmp.PASS);
+        } else {
+            cmpRow("telephony.nai", null, trunc(oNai, 24), Cmp.FAIL);
+        }
+        // R3 audit 2026-10-05: SubscriptionManager.getPhoneNumber(int) is
+        // hooked to the per-identity MSISDN (fail-closed null when inactive).
+        String oSubNum = null;
+        try {
+            if (err == null) {
+                android.telephony.SubscriptionManager sm =
+                        android.telephony.SubscriptionManager.from(this);
+                oSubNum = emptyToNull(sm.getPhoneNumber(1));
+            }
+        } catch (Exception ignored) {
+        }
+        cmpTeleField("telephony.submgrPhoneNumber", opt(tel, "phoneNumber"), oSubNum,
+                oSubNum == null ? "UNREADABLE" : err, false);
         if (err != null) {
             cmpRow("telephony.networkType", eNt < 0 ? null : networkTypeName(eNt), err,
                     Cmp.UNKNOWN);
@@ -1426,6 +1484,17 @@ public class MainActivity extends Activity {
                 cmpRow("build.serial", opt(dev, "serial"),
                         "UNAVAILABLE(" + e.getClass().getSimpleName() + ")", Cmp.UNKNOWN);
             }
+            // R3 audit 2026-10-05: ro.boot.serialno must match the per-identity
+            // serial (the engine tables serve it; the host build.prop now
+            // carries it too).
+            cmpString("sysprop.ro.boot.serialno", opt(dev, "serial"),
+                    sysProp("ro.boot.serialno"));
+            // R3 audit 2026-10-05: Build.getRadioVersion() reads
+            // gsm.version.baseband, which the Java SystemProperties Pine layer
+            // answers from the profile's RADIO field. Permissionless and
+            // genuinely discriminating.
+            cmpString("build.radioVersion", opt(dev, "radio"),
+                    emptyToNull(Build.getRadioVersion()));
             // No ISub binder proxy exists: the Pine hooks must hide the real list.
             try {
                 android.telephony.SubscriptionManager sm = (android.telephony.SubscriptionManager)
@@ -1550,6 +1619,38 @@ public class MainActivity extends Activity {
                     note, Cmp.UNKNOWN);
         } else {
             cmpString("mediadrm.deviceUid", expectedHex, observedHex);
+        }
+        // R3 audit 2026-10-05: getPropertyString("systemId") is hooked to a
+        // per-identity SHA-256("widevine-systemid-" + androidId). Verify it
+        // the same way as deviceUniqueId.
+        String expectedSysId = null;
+        if (androidId != null) {
+            try {
+                MessageDigest sha2 = MessageDigest.getInstance("SHA-256");
+                byte[] d2 = sha2.digest(("widevine-systemid-" + androidId).getBytes("UTF-8"));
+                StringBuilder sb2 = new StringBuilder();
+                for (byte b : d2) sb2.append(String.format("%02x", b));
+                expectedSysId = sb2.toString();
+            } catch (Exception ignored) {
+            }
+        }
+        String observedSysId = null;
+        String sysIdNote = null;
+        try {
+            android.media.MediaDrm drm2 = new android.media.MediaDrm(WIDEVINE_UUID);
+            try {
+                observedSysId = drm2.getPropertyString("systemId");
+            } finally {
+                drm2.release();
+            }
+        } catch (Exception e) {
+            sysIdNote = "UNAVAILABLE(" + e.getClass().getSimpleName() + ")";
+        }
+        if (sysIdNote != null) {
+            cmpRow("mediadrm.systemId", expectedSysId == null ? null : expectedSysId.substring(0, 16) + "…",
+                    sysIdNote, Cmp.UNKNOWN);
+        } else {
+            cmpString("mediadrm.systemId", expectedSysId, observedSysId);
         }
     }
 

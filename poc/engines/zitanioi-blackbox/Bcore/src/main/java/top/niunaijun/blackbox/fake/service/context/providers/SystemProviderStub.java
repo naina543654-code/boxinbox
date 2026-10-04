@@ -188,27 +188,43 @@ public class SystemProviderStub extends ClassInvocationStub implements BContentP
 
     /**
      * Extracts the caller's projection from a query() invocation.
-     * <p>API 29 and below: {@code query(Uri, String[] projection, ...)} —
-     * projection is {@code args[1]}. API 30+: {@code query(Uri, String[],
-     * Bundle queryArgs, CancellationSignal)} — {@code args[1]} is the
-     * {@code Bundle} and the projection lives inside it under
-     * {@code ContentResolver.QUERY_ARG_SQL_PROJECTION}. Missing this made the
-     * API-30+ path silently return the wrong column shape (re-audit
-     * 2026-10-04).
+     *
+     * <p>R3 audit 2026-10-05: interception is at the {@code IContentProvider}
+     * level, not {@code ContentProvider} — the old code read {@code args[1]}
+     * (the Uri) as the projection, so the branch never fired. The arg layout
+     * differs by API: {@code query(AttributionSource, Uri, String[],
+     * Bundle, ...)} on API 31+, {@code query(String, String, Uri, String[],
+     * Bundle, ...)} on API 30. Instead of hardcoding indices, anchor on the
+     * Uri: the projection is the {@code String[]} right after it, and on
+     * API 30+ the projection may instead live inside the following
+     * {@code queryArgs} Bundle under
+     * {@code ContentResolver.QUERY_ARG_SQL_PROJECTION}.
      */
     private static String[] extractProjection(Object[] args) {
-        if (args == null || args.length < 2) {
+        if (args == null) {
             return null;
         }
-        Object p = args[1];
-        if (p instanceof String[]) {
-            return (String[]) p;
-        }
-        if (p instanceof Bundle) {
-            // Literal: ContentResolver.QUERY_ARG_SQL_PROJECTION
-            // ("android:query-arg-sql-projection") — the SDK constant is not
-            // in android.jar's stubs, but the framework string is stable.
-            return ((Bundle) p).getStringArray("android:query-arg-sql-projection");
+        for (int i = 0; i < args.length; i++) {
+            if (args[i] instanceof android.net.Uri) {
+                if (i + 1 < args.length && args[i + 1] instanceof String[]) {
+                    String[] proj = (String[]) args[i + 1];
+                    if (proj != null) {
+                        return proj;
+                    }
+                }
+                if (i + 2 < args.length && args[i + 2] instanceof Bundle) {
+                    // Literal: ContentResolver.QUERY_ARG_SQL_PROJECTION
+                    // ("android:query-arg-sql-projection") — the SDK constant
+                    // is not in android.jar's stubs, but the framework string
+                    // is stable.
+                    String[] proj = ((Bundle) args[i + 2])
+                            .getStringArray("android:query-arg-sql-projection");
+                    if (proj != null) {
+                        return proj;
+                    }
+                }
+                return null;
+            }
         }
         return null;
     }

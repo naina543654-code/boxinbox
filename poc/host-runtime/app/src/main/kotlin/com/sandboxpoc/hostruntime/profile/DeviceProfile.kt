@@ -1449,6 +1449,11 @@ data class SpoofProfile(
         prop("ro.soc.manufacturer", d.socManufacturer)
         prop("ro.soc.model", d.socModel)
         prop("ro.serialno", d.serial)
+        // R3 audit 2026-10-05: ro.boot.serialno was served per-identity by
+        // the engine tables but missing here — a guest reading the spoofed
+        // build.prop saw the real ro.serialno's absence vs the hooked value
+        // (incoherence tell).
+        prop("ro.boot.serialno", d.serial)
         prop("ro.debuggable", "0")
         prop("ro.secure", "1")
         // Real, non-identifying hardware facts (same on any arm64 phone).

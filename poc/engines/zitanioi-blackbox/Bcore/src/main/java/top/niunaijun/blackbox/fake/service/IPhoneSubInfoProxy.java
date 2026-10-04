@@ -189,8 +189,8 @@ public class IPhoneSubInfoProxy extends ClassInvocationStub {
     public static class getDeviceSvnUsingSubId extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            // Device software version (IMEI/SV) — stable device identifier.
-            return spoofedOrLegacyDeviceId();
+            // R3 audit 2026-10-05: see getDeviceSvn — null, not the device ID.
+            return null;
         }
     }
 
@@ -296,7 +296,11 @@ public class IPhoneSubInfoProxy extends ClassInvocationStub {
     public static class getDeviceSvn extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            return spoofedOrLegacyDeviceId();
+            // R3 audit 2026-10-05: was serving the full device ID as the
+            // software version — an implausible shape (real SVNs look like
+            // "01"). No per-identity SVN exists; null ("unknown") is the
+            // plausible fail-closed value.
+            return null;
         }
     }
 
@@ -354,7 +358,9 @@ public class IPhoneSubInfoProxy extends ClassInvocationStub {
     public static class getIsimImpu extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            return null;
+            // R3 audit 2026-10-05: empty array, not null — some IMS/VoLTE
+            // paths don't null-check before iterating (stability tell).
+            return new String[0];
         }
     }
 
@@ -362,7 +368,8 @@ public class IPhoneSubInfoProxy extends ClassInvocationStub {
     public static class getImsPublicUserIdentities extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            return null;
+            // R3 audit 2026-10-05: empty list, not null — see getIsimImpu.
+            return new java.util.ArrayList<>();
         }
     }
 
