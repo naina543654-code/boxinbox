@@ -129,6 +129,24 @@ public class IWifiManagerProxy extends BinderInvocationStub {
         }
     }
 
+    @ProxyMethod("getPrivilegedConfiguredNetworks")
+    public static class GetPrivilegedConfiguredNetworks extends MethodHook {
+        /**
+         * Review 2026-10-05: the privileged variant of getConfiguredNetworks
+         * (API 33+, NETWORK_SETTINGS-gated) was still open — same saved-SSID
+         * leak, same fix. AIDL declares a plain List<WifiConfiguration>
+         * (the public API returns it directly with no slice unwrapping).
+         */
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            if (BSpoofManager.get().isSpoofActive()) {
+                Log.d(TAG, "getPrivilegedConfiguredNetworks: spoofed -> empty");
+                return new ArrayList<>();
+            }
+            return method.invoke(who, args);
+        }
+    }
+
     @ProxyMethod("getConnectionInfo")
     public static class GetConnectionInfo extends MethodHook {
         /*

@@ -11,6 +11,21 @@ see `poc/SPOOFING_MATRIX.md` for the verification matrix.
 
 ## Unreleased (on `main` since `poc-v2.2`)
 
+- Code review pass (2026-10-05, sources `add1897`): swept the engine for
+  remaining direct-binder and public-API gaps after the re-audit batches.
+  - `IPhoneSubInfo`: hooked the bare deprecated variants `getDeviceSvn`,
+    `getSubscriberId`, `getIccSerialNumber` (reachable via direct binder
+    reflection) and the ISIM/IMS identifiers `getIsimImpi`,
+    `getImsPrivateUserIdentity`, `getIsimDomain`, `getIsimImpu`,
+    `getImsPublicUserIdentities`, `getIsimIst`, `getIsimPcscf` → null.
+  - `BTelephonyApiSpoof`: Pine hooks for `getSimOperator`/`(int)`,
+    `getSimOperatorName`/`(int)`, `getSimCountryIso`/`(int)`,
+    `getNetworkCountryIso`/`(int)` serving the per-identity operator/country
+    — defense-in-depth after the network-operator getters proved the
+    `ITelephony` binder proxy can be bypassed on some framework builds.
+  - `IWifiManagerProxy`: hooked `getPrivilegedConfiguredNetworks` (API 33+,
+    NETWORK_SETTINGS-gated) → empty list when active — the privileged
+    variant of the saved-networks leak.
 - Re-audit 2 residual batch (2026-10-04): closes the 7 remaining re-audit
   findings (N6/N8/N9/N10/N11/N12 + Advertising-ID claim correction).
   - MEDIUM: `TelephonyManager.getNai()` Pine-hooked → always null (new
