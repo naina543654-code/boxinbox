@@ -129,3 +129,4 @@ see `poc/SPOOFING_MATRIX.md` for the verification matrix.
 - Host: `SandboxApp` bakes the installed WebView's real Chrome major into each identity's UA (fixes Chrome/126 claim vs installed 121 skew); `ClientConfiguration.isHideXposed()` now true.
 - Known residuals (documented, not patched): Play Integrity verdicts (unforgeable client-side), shared-UID provability, dataDir paths containing the host package (needs path virtualization — risky), Pine frames in stack traces, sensor/camera/GPU live hardware, `/proc/net/route` + DNS, `Resources.getConfiguration()` locale vs `Locale.getDefault()`.
 - Untested on-device: needs Jason's install + probe run.
+- Artifacts rebuilt from 4052ec2 and committed: engine AAR md5 171fbe4702eec8142503b097da41ee4e (BProcFsSpoof/BSpoofAaid/AaidSpoofInjector verified in classes.jar and host dex); host APK versionName 1.0-poc-runtime-4052ec2; probe 1.0-4052ec2 (stamps verified in resources.arsc).
