@@ -1063,6 +1063,7 @@ public class MainActivity extends Activity {
         String oIso = null;
         int oNt = -1;
         String oSim = null;
+        String oLine1 = null;
         String err = null;
         try {
             if (checkSelfPermission(Manifest.permission.READ_PHONE_STATE)
@@ -1082,6 +1083,11 @@ public class MainActivity extends Activity {
                     } catch (Exception ignored) {
                         // ICCID unreadable on this build; row below -> UNKNOWN.
                     }
+                    try {
+                        oLine1 = emptyToNull(tm.getLine1Number());
+                    } catch (Exception ignored) {
+                        // Line-1 number unreadable on this build; row below -> UNKNOWN.
+                    }
                     if (oName == null && oNum == null && oIso == null) {
                         err = "NO_NETWORK_INFO (empty results)";
                     }
@@ -1097,6 +1103,8 @@ public class MainActivity extends Activity {
         cmpTeleField("telephony.countryIso", eIso, oIso, err, true);
         cmpTeleField("telephony.simSerial", opt(tel, "simSerial"), oSim,
                 oSim == null ? "UNREADABLE" : err, false);
+        cmpTeleField("telephony.line1Number", opt(tel, "phoneNumber"), oLine1,
+                oLine1 == null ? "UNREADABLE" : err, false);
         if (err != null) {
             cmpRow("telephony.networkType", eNt < 0 ? null : networkTypeName(eNt), err,
                     Cmp.UNKNOWN);

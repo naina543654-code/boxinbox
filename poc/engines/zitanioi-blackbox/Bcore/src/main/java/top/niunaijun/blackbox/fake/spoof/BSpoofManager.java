@@ -153,7 +153,8 @@ public class BSpoofManager {
     private String mSubscriberId;
     private int mNetworkType = 13; // TelephonyManager.NETWORK_TYPE_LTE
     private String mSimSerial;
-
+    /** Per-identity MSISDN (E.164) for getLine1Number — never the real SIM number. */
+    private String mPhoneNumber;
     private String mTimezoneId;
     private String mLocaleTag;
     private String mWebViewUa;
@@ -410,6 +411,17 @@ public class BSpoofManager {
     }
 
     /**
+     * Per-identity MSISDN (E.164) for {@code TelephonyManager.getLine1Number()}.
+     * The real SIM number would be a stable cross-identity link for any
+     * backend that keys accounts by device-reported number, so it is never
+     * passed through. Null when spoofing is inactive / absent.
+     */
+    public String getPhoneNumber() {
+        ensureLoaded();
+        return mSpoofActive ? mPhoneNumber : null;
+    }
+
+    /**
      * Track B: per-identity radio network type from the spoof profile.
      * Returns -1 when no spoof is active or no valid value was staged.
      */
@@ -647,6 +659,7 @@ public class BSpoofManager {
             mSubscriberId = telephony.optString("subscriberId", null);
             mNetworkType = telephony.optInt("networkType", 13);
             mSimSerial = telephony.optString("simSerial", null);
+            mPhoneNumber = telephony.optString("phoneNumber", null);
         }
 
         JSONObject locale = root.optJSONObject("locale");

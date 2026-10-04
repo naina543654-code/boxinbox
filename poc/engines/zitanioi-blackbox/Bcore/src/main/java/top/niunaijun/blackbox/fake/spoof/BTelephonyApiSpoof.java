@@ -53,6 +53,13 @@ public final class BTelephonyApiSpoof {
                 // Network operator numeric (MCC+MNC), e.g. "42701".
                 hookOperatorGetter("getNetworkOperator", new Class<?>[0], true);
                 hookOperatorGetter("getNetworkOperator", new Class<?>[]{int.class}, true);
+                // Line-1 (MSISDN) number: the ITelephony binder hook above
+                // covers the service path, but hook the public API too — the
+                // operator getters proved these TelephonyManager methods can
+                // bypass both the binder proxy and the SystemProperties hooks
+                // on some framework builds. The real SIM number must never
+                // leak: it is identical across identities.
+                hookLine1Number();
                 sInstalled = true;
                 Slog.d(TAG, "TelephonyManager operator API hooks installed");
             } catch (Throwable t) {
@@ -91,6 +98,34 @@ public final class BTelephonyApiSpoof {
             });
         } catch (Throwable t) {
             Slog.e(TAG, "Pine hook on TelephonyManager." + name + " failed", t);
+        }
+    }
+
+    /** Hooks {@code TelephonyManager.getLine1Number()} to the per-identity MSISDN. */
+    private static void hookLine1Number() {
+        final Method target;
+        try {
+            target = TelephonyManager.class.getDeclaredMethod("getLine1Number");
+        } catch (Throwable t) {
+            Slog.e(TAG, "TelephonyManager.getLine1Number not found; skipping", t);
+            return;
+        }
+        try {
+            Pine.hook(target, new MethodHook() {
+                @Override
+                public void beforeCall(Pine.CallFrame callFrame) {
+                    BSpoofManager spoof = BSpoofManager.get();
+                    if (!spoof.isSpoofActive()) {
+                        return;
+                    }
+                    String number = spoof.getPhoneNumber();
+                    if (number != null) {
+                        callFrame.setResult(number);
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            Slog.e(TAG, "Pine hook on TelephonyManager.getLine1Number failed", t);
         }
     }
 }

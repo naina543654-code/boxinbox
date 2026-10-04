@@ -130,3 +130,9 @@ see `poc/SPOOFING_MATRIX.md` for the verification matrix.
 - Known residuals (documented, not patched): Play Integrity verdicts (unforgeable client-side), shared-UID provability, dataDir paths containing the host package (needs path virtualization — risky), Pine frames in stack traces, sensor/camera/GPU live hardware, `/proc/net/route` + DNS, `Resources.getConfiguration()` locale vs `Locale.getDefault()`.
 - Untested on-device: needs Jason's install + probe run.
 - Artifacts rebuilt from 4052ec2 and committed: engine AAR md5 171fbe4702eec8142503b097da41ee4e (BProcFsSpoof/BSpoofAaid/AaidSpoofInjector verified in classes.jar and host dex); host APK versionName 1.0-poc-runtime-4052ec2; probe 1.0-4052ec2 (stamps verified in resources.arsc).
+
+## 2026-10-04 — per-identity phone number (MSISDN leak fix)
+- Root cause for "Wakie detects the previous account on a fresh identity": `TelephonyManager.getLine1Number()` had NO hook — neither the `ITelephonyManagerProxy` AIDL hook nor a Pine API hook covered it — so every guest read the host SIM's REAL phone number, identical across all identities. Any backend keying accounts by device-reported number links every new account to the previous one.
+- Fix: per-identity E.164 MSISDN (`telephony.phoneNumber`), generated at identity creation coherent with the profile country (calling-code table for all 59 pool countries), validated (`^\+\d{7,15}$`), plumbed through the profile JSON contract, and served at BOTH choke points (AIDL proxy + Pine `TelephonyManager.getLine1Number()` hook). The real SIM number is never passed through when a profile is active.
+- ProbeV2 gains a `telephony.line1Number` comparison row (needs READ_PHONE_STATE).
+- Untested on-device: needs Jason's install + probe run with phone permission granted.

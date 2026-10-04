@@ -205,6 +205,46 @@ internal fun newSimSerial(): String {
 }
 
 /**
+ * Country calling code + typical national mobile-number length, keyed by the
+ * profile country ISO. Used to generate a plausible per-identity MSISDN so
+ * guests never see the host SIM's real number (a stable cross-identity
+ * link for any backend that keys accounts by device-reported number).
+ */
+private val COUNTRY_CALLING: Map<String, Pair<String, Int>> = mapOf(
+    "us" to ("1" to 10), "ca" to ("1" to 10), "mx" to ("52" to 10),
+    "br" to ("55" to 11), "ar" to ("54" to 10), "cl" to ("56" to 9),
+    "co" to ("57" to 10), "pe" to ("51" to 9), "gb" to ("44" to 10),
+    "ie" to ("353" to 9), "fr" to ("33" to 9), "de" to ("49" to 11),
+    "es" to ("34" to 9), "it" to ("39" to 10), "pt" to ("351" to 9),
+    "nl" to ("31" to 9), "be" to ("32" to 9), "ch" to ("41" to 9),
+    "at" to ("43" to 10), "se" to ("46" to 9), "no" to ("47" to 8),
+    "dk" to ("45" to 8), "fi" to ("358" to 9), "pl" to ("48" to 9),
+    "cz" to ("420" to 9), "hu" to ("36" to 9), "ro" to ("40" to 10),
+    "gr" to ("30" to 10), "ua" to ("380" to 9), "tr" to ("90" to 10),
+    "ae" to ("971" to 9), "sa" to ("966" to 9), "qa" to ("974" to 8),
+    "il" to ("972" to 9), "eg" to ("20" to 10), "ma" to ("212" to 9),
+    "ng" to ("234" to 10), "ke" to ("254" to 9), "gh" to ("233" to 9),
+    "za" to ("27" to 9), "in" to ("91" to 10), "pk" to ("92" to 10),
+    "bd" to ("880" to 10), "lk" to ("94" to 9), "np" to ("977" to 10),
+    "sg" to ("65" to 8), "my" to ("60" to 10), "th" to ("66" to 9),
+    "id" to ("62" to 11), "ph" to ("63" to 10), "vn" to ("84" to 9),
+    "kh" to ("855" to 9), "jp" to ("81" to 10), "kr" to ("82" to 10),
+    "cn" to ("86" to 11), "hk" to ("852" to 8), "tw" to ("886" to 9),
+    "au" to ("61" to 9), "nz" to ("64" to 9),
+)
+
+/** Random per-identity MSISDN in E.164 (`+<cc><national>`), coherent with the profile country. */
+internal fun newPhoneNumber(countryIso: String): String {
+    val (cc, len) = COUNTRY_CALLING[countryIso] ?: ("1" to 10)
+    val r = java.security.SecureRandom()
+    val sb = StringBuilder("+").append(cc)
+    // First national digit non-zero (like real mobile allocations).
+    sb.append(r.nextInt(9) + 1)
+    repeat(len - 1) { sb.append(r.nextInt(10)) }
+    return sb.toString()
+}
+
+/**
  * Spoofed device profile for one virtual identity. `extras` is an extensible
  * map for future engine-specific fields (serial, IMEI-shaped values, MAC,
  * telephony props, …). The core fields mirror android.os.Build so an engine
@@ -1236,6 +1276,8 @@ data class SpoofProfile(
         val networkType: Int,
         /** Per-identity ICCID (19-20 digits, 89 prefix) for getSimSerialNumber. */
         val simSerial: String,
+        /** Per-identity MSISDN (E.164) for getLine1Number — never the real SIM number. */
+        val phoneNumber: String,
     )
 
     data class LocaleInfo(
@@ -1318,7 +1360,8 @@ data class SpoofProfile(
         jname("deviceId"); append(':'); jstr(telephony.deviceId); append(',')
         jname("subscriberId"); append(':'); jstr(telephony.subscriberId); append(',')
         jname("networkType"); append(':'); append(telephony.networkType.toString()); append(',')
-        jname("simSerial"); append(':'); jstr(telephony.simSerial)
+        jname("simSerial"); append(':'); jstr(telephony.simSerial); append(',')
+        jname("phoneNumber"); append(':'); jstr(telephony.phoneNumber)
         append("},")
         append("\"locale\":{")
         jname("timezoneId"); append(':'); jstr(locale.timezoneId); append(',')
@@ -1525,6 +1568,11 @@ data class SpoofProfile(
                     subscriberId = getStr(t, "subscriberId"),
                     simSerial = (t["simSerial"] as? String)
                         ?.takeIf { it.isNotEmpty() } ?: newSimSerial(),
+                    // Tolerant: profiles persisted before phoneNumber existed
+                    // get a fresh per-identity number rather than failing.
+                    phoneNumber = (t["phoneNumber"] as? String)
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: newPhoneNumber(getStr(t, "countryIso")),
                 ),
                 locale = run {
                     val lo = root["locale"] as? Map<*, *>

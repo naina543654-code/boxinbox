@@ -161,6 +161,26 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         }
     }
 
+    /**
+     * Track F: per-identity MSISDN. Without this hook the guest reads the
+     * host SIM's REAL phone number — identical across every identity, a
+     * stable cross-identity link for any backend that keys accounts by
+     * device-reported number. Active profile -> per-identity E.164 number;
+     * inactive -> genuine passthrough.
+     */
+    @ProxyMethod("getLine1Number")
+    public static class GetLine1Number extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            BSpoofManager spoof = BSpoofManager.get();
+            if (spoof.isSpoofActive() && spoof.getPhoneNumber() != null) {
+                Log.d(TAG, "getLine1Number: spoofed");
+                return spoof.getPhoneNumber();
+            }
+            return method.invoke(who, args);
+        }
+    }
+
     @ProxyMethod("getCellLocation")
     public static class GetCellLocation extends MethodHook {
         @Override

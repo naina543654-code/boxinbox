@@ -334,6 +334,7 @@ object ProfileGenerator {
                 subscriberId = newSubscriberId(operator.numeric.take(3)),
                 networkType = newNetworkType(),
                 simSerial = newSimSerial(),
+                phoneNumber = newPhoneNumber(city.countryIso),
             ),
             locale = SpoofProfile.LocaleInfo(
                 timezoneId = timezoneFor(city.countryIso),
