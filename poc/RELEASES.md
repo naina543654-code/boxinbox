@@ -136,3 +136,4 @@ see `poc/SPOOFING_MATRIX.md` for the verification matrix.
 - Fix: per-identity E.164 MSISDN (`telephony.phoneNumber`), generated at identity creation coherent with the profile country (calling-code table for all 59 pool countries), validated (`^\+\d{7,15}$`), plumbed through the profile JSON contract, and served at BOTH choke points (AIDL proxy + Pine `TelephonyManager.getLine1Number()` hook). The real SIM number is never passed through when a profile is active.
 - ProbeV2 gains a `telephony.line1Number` comparison row (needs READ_PHONE_STATE).
 - Untested on-device: needs Jason's install + probe run with phone permission granted.
+- Artifacts rebuilt from 61844fb and committed: engine AAR md5 7efee965ea8cca3f04e7470d97cb7484 (GetLine1Number proxy + Pine hooks verified in host dex); host APK versionName 1.0-poc-runtime-61844fb; probe 1.0-61844fb (stamps verified in resources.arsc; probe gains the telephony.line1Number row).
