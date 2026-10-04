@@ -11,12 +11,64 @@ see `poc/SPOOFING_MATRIX.md` for the verification matrix.
 
 ## Unreleased (on `main` since `poc-v2.2`)
 
-- R4 audit fix batch (2026-10-05, sources `893bcba`, binaries `973a88f`,
-  host footer `893bcba (2026-10-05)`, engine AAR md5
-  `4d262fdb910c14c31137f1ffce710064` — fourth full code audit,
+- R4 audit fix batch (2026-10-05, sources `f0e3ad8`, binaries `75ef40b`,
+  host footer `f0e3ad8 (2026-10-05)`, engine AAR md5
+  `2f89a1a6ae43fab8aad688abb869430d` — fourth full code audit,
   `files/CODE-AUDIT-R4-2026-10-05.md`: 59 OK / 5 partial / 0 broken of
   64 matrix rows; 17 of 18 R3 items confirmed fixed, zero regressions;
   27 new findings: 2 Medium, 12 Low, 13 Informational; no Critical/High).
+  - MEDIUM: cell-tower callback blackout — `ITelephonyRegistryProxy`
+    `listen`/`listenForSubscriber` now strip `LISTEN_CELL_INFO` /
+    `LISTEN_CELL_LOCATION` from the event mask when active, and
+    `ITelephony.requestCellInfoUpdate[WithWorkSource]` no-ops (the sync
+    cell paths were already emptied; the async path delivered real towers).
+  - MEDIUM: `SystemProviderStub` now scans Bundle
+    `android:query-arg-sql-selection[-args]` in `isAndroidIdRequest` and
+    `requestedDevKey` — API 30+ `ContentResolver.query` carries the
+    selection in the Bundle, bypassing the Android-ID and `adb_enabled`
+    spoofs via direct query.
+  - LOW: new binder hooks — `ITelephony.getDeviceSoftwareVersionForSlot`
+    → null, `getServiceStateForSubscriber` → null,
+    `IWifiManager.getCountryCode` → per-identity country,
+    `getDhcpInfo` → null, `getFactoryMacAddresses` → empty,
+    `getPrivilegedConnectedNetwork` → null, `IWifiScannerProxy`
+    `getScanResults`/`getSingleScanResults` → empty (was an empty proxy).
+  - LOW: `ParceledListSlice` reflection failure now fails closed to null
+    (was passthrough of real saved networks).
+  - LOW: `INetworkManagementService.getInterfaceConfig` rewrites the
+    hardware address to the per-identity MAC for `wlan0` via reflective
+    `setHardwareAddress` (permissionless binder path around the
+    NetworkInterface Pine hook).
+  - LOW: deleted the 11 dead operator/country binder names in
+    `ITelephonyManagerProxy` (values never traverse ITelephony on
+    API 33/34 — real coverage is the Pine hooks + getprop table); kept the
+    one live hook `getNetworkCountryIsoForPhone(int)` with a corrected
+    comment.
+  - INFO: `BSpoofNetwork` now wraps the guest's `NetworkCallback` in
+    `SanitizingCallback` — `onCapabilitiesChanged` strips TRANSPORT_VPN
+    and `onLinkPropertiesChanged` renames tunnel interfaces, closing the
+    callback-path VPN tell; callback flags preserved reflectively so
+    guest-requested behavior (e.g. FLAG_INCLUDE_LOCATION_INFO) survives
+    wrapping.
+  - Comment/doc corrections: `Build.getSerial()` Pine hook now fails
+    closed (null) when inactive, matching its comment; BTelephonyApiSpoof
+    javadoc updated to fail-closed; `(int)` overload params correctly
+    documented as subId; dead VERSION_RELEASE/VERSION_SDK lookups removed;
+    BSpoofManager schema javadoc refreshed; probe-row count corrected
+    (8, not 7); extractProjection API-30 javadoc corrected.
+  - R3-17 (`md5(hostPkg)` fallback) still present — deferral re-justified
+    by R4 with corrected reachability: reachable only in the transient
+    no-profile window (surviving guest after Delete/Reset).
+  - Post-fix bug-hunt on the R4 batch itself (Jason's request): verified
+    the PhoneStateListener bitmask values against android.jar stubs
+    (LISTEN_CELL_INFO=1024, LISTEN_CELL_LOCATION=16), confirmed no stale
+    references to the deleted hook classes, confirmed all 7 public
+    NetworkCallback methods are overridden in the wrapper, fixed two real
+    issues found — the `NetworkCallback(int)` constructor is @hide
+    (flag copy moved to reflective field set) and
+    `InterfaceConfiguration.setHardwareAddress` is the reliable reflective
+    target (not a guessed field name).
+  - None device-verified yet — same device test as the R3 batch applies.
   - MEDIUM: cell-tower callback blackout — `ITelephonyRegistryProxy`
     `listen`/`listenForSubscriber` now strip `LISTEN_CELL_INFO` /
     `LISTEN_CELL_LOCATION` from the event mask when active, and
