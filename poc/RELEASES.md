@@ -160,3 +160,4 @@ Full six-track code audit (51 matrix rows: 44 OK / 2 partial / 5 broken). Fixed:
 - ProbeV2: 14 new rows (subscriberId, voiceMail, deviceId, build.serial, sysprop.ro.serialno, submgr.activeList, wifi.configuredNets, mediadrm.deviceUid, proc.version, sys.build.prop, sys.wlan0.address, bt.bondedDevices, settings.adb_enabled) + BLUETOOTH_CONNECT permission.
 - UI: full visual redesign (cards, pills, collapsible technical details, danger zone) — same features, decluttered.
 - Untested on-device: entire batch needs Jason's install + probe run.
+- Artifacts rebuilt from 0f3fd99 and committed: engine AAR md5 b1c692c47adea72cc7496cc1c6d25e61 (BSubscriptionSpoof, BSpoofMediaDrm, IPhoneSubInfo hooks, GetConfiguredNetworks verified in host dex); host APK versionName 1.0-poc-runtime-0f3fd99 (new UI); probe 1.0-0f3fd99 (14 new audit rows + BLUETOOTH_CONNECT).
