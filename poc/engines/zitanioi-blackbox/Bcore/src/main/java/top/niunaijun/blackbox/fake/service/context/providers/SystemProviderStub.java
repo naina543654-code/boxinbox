@@ -167,11 +167,7 @@ public class SystemProviderStub extends ClassInvocationStub implements BContentP
      * string into the value slot.
      */
     private static android.database.Cursor valueCursor(Object[] args, String key, String value) {
-        String[] projection = null;
-        // ContentProvider.query(Uri, String[] projection, ...): args[1].
-        if (args != null && args.length > 1 && args[1] instanceof String[]) {
-            projection = (String[]) args[1];
-        }
+        String[] projection = extractProjection(args);
         if (projection == null || projection.length == 0) {
             projection = new String[]{"name", "value"};
         }
@@ -188,6 +184,33 @@ public class SystemProviderStub extends ClassInvocationStub implements BContentP
         }
         cursor.addRow(row);
         return cursor;
+    }
+
+    /**
+     * Extracts the caller's projection from a query() invocation.
+     * <p>API 29 and below: {@code query(Uri, String[] projection, ...)} —
+     * projection is {@code args[1]}. API 30+: {@code query(Uri, String[],
+     * Bundle queryArgs, CancellationSignal)} — {@code args[1]} is the
+     * {@code Bundle} and the projection lives inside it under
+     * {@code ContentResolver.QUERY_ARG_SQL_PROJECTION}. Missing this made the
+     * API-30+ path silently return the wrong column shape (re-audit
+     * 2026-10-04).
+     */
+    private static String[] extractProjection(Object[] args) {
+        if (args == null || args.length < 2) {
+            return null;
+        }
+        Object p = args[1];
+        if (p instanceof String[]) {
+            return (String[]) p;
+        }
+        if (p instanceof Bundle) {
+            // Literal: ContentResolver.QUERY_ARG_SQL_PROJECTION
+            // ("android:query-arg-sql-projection") — the SDK constant is not
+            // in android.jar's stubs, but the framework string is stable.
+            return ((Bundle) p).getStringArray("android:query-arg-sql-projection");
+        }
+        return null;
     }
 
     /** Returns which dev-mode key was requested, or null. */

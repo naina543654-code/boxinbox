@@ -11,6 +11,36 @@ see `poc/SPOOFING_MATRIX.md` for the verification matrix.
 
 ## Unreleased (on `main` since `poc-v2.2`)
 
+- Re-audit 2 fix batch (2026-10-04, sources TBD — second full code audit,
+  `files/CODE-AUDIT-R2-2026-10-04.md`: 58 OK / 4 partial / 1 broken of
+  63 matrix rows; 22/26 batch items verified, 4 flawed; 0 regressions).
+  - CRITICAL crash fix: `IWifiManagerProxy.GetConfiguredNetworks` returned a
+    raw `ArrayList` where the AIDL declares `ParceledListSlice` → guest
+    `ClassCastException` on any configured-networks read. Now builds an empty
+    `ParceledListSlice` via reflection (the class is @hide, absent from
+    android.jar).
+  - CRITICAL: `SubscriptionManager.getPhoneNumber(int)`/`(int,int)` hooked →
+    per-identity MSISDN (public-API bypass of the `getLine1Number` hooks).
+  - HIGH: `ro.boot.serialno` now serves the per-identity serial (was leaking
+    the real hardware serial, zero permission).
+  - HIGH: `MediaDrm.getPropertyString("systemId")` hooked → per-identity hex
+    (the batch had missed the sibling property).
+  - HIGH: `gsm.version.baseband` now answered at the Java `SystemProperties`
+    Pine layer too (was only covered on the getprop/exec path).
+  - HIGH: `SubscriptionInfo.getCardId()` → per-identity deterministic int and
+    `getGroupUuid()` → null (stable SIM links via alternate getters).
+  - HIGH: Reset/Delete now clears the daemon's in-memory account map via new
+    `IBAccountManagerService.clearAccountsForUser(int)` — deleting
+    `accounts.conf` from disk was only half the fix (old accounts stayed
+    visible in-session).
+  - MEDIUM: `SystemProviderStub.query()` projection fix extended to the API
+    30+ `query(Uri, String[], Bundle, CancellationSignal)` signature (the
+    projection lives inside `queryArgs`; the old fix was inert on API 30+).
+  - MEDIUM: `BSubscriptionSpoof` is now fully fail-closed (spoofed values
+    served unconditionally, matching the `getLine1Number` Pine hook).
+  None of this batch is device-verified yet — compile + AIDL + dex checked;
+  hook firing needs the probe run on-device.
+
 - `ff10944` — Per-identity dynamic radio network type (60% LTE / 25% NR /
   15% HSPA). Confirmed varying across identities on-device (NR=20 on one
   identity vs HSPA=10 on the previous).

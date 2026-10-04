@@ -333,4 +333,18 @@ public class BAccountManager extends BlackManager<IBAccountManagerService> {
             e.printStackTrace();
         }
     }
+
+    /**
+     * BoxInBox 2026-10-04: userId-explicit variant for the host wipe path
+     * (the other methods bind BActivityThread.getUserId(), which is wrong in
+     * the host process). Drops every account for the virtual user from the
+     * daemon's in-memory map and persists the change.
+     */
+    public void clearAccountsForUser(int userId) {
+        try {
+            getService().clearAccountsForUser(userId);
+        } catch (RemoteException e) {
+            e.printStackTrace();
+        }
+    }
 }

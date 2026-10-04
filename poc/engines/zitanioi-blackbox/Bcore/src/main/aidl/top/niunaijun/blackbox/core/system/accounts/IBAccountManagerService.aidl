@@ -67,6 +67,11 @@ interface IBAccountManagerService {
     void registerAccountListener(in String[] accountTypes, String opPackageName, int userId);
     void unregisterAccountListener(in String[] accountTypes, String opPackageName, int userId);
 
+    /* BoxInBox: drop every account for a virtual user from the daemon's
+       in-memory map and persist. Deleting accounts.conf from disk alone
+       leaves the in-memory BUserAccounts visible in-session. */
+    void clearAccountsForUser(int userId);
+
     /* Check if the package in a user can access an account */
 //    boolean hasAccountAccess(in Account account, String packageName, in UserHandle userHandle);
     /* Crate an intent to request account access for package and a given user id */

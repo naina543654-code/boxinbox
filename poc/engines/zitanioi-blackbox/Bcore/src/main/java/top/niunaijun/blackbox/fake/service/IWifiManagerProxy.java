@@ -57,8 +57,7 @@ public class IWifiManagerProxy extends BinderInvocationStub {
          */
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            if (BSpoofManager.get().isSpoofActive()) {
-                Log.d(TAG, "getScanResults: spoofed -> empty");
+            if (BSpoofManager.get().isSpoofActive()) {                Log.d(TAG, "getScanResults: spoofed -> empty");
                 return new ArrayList<>();
             }
             return method.invoke(who, args);
@@ -77,9 +76,37 @@ public class IWifiManagerProxy extends BinderInvocationStub {
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             if (BSpoofManager.get().isSpoofActive()) {
                 Log.d(TAG, "getConfiguredNetworks: spoofed -> empty");
-                return new ArrayList<>();
+                // Re-audit 2026-10-04 (CRITICAL): the AIDL declares
+                // ParceledListSlice, not List — returning a raw ArrayList
+                // throws ClassCastException in the guest. ParceledListSlice
+                // is @hide (absent from android.jar), so instantiate it by
+                // reflection against the on-device framework class.
+                Object slice = newParceledListSlice();
+                if (slice != null) {
+                    return slice;
+                }
+                return method.invoke(who, args);
             }
             return method.invoke(who, args);
+        }
+
+        /**
+         * Builds an empty {@code android.content.pm.ParceledListSlice} via
+         * reflection (the class is @hide, absent from android.jar, but
+         * present on every device). Returns null if construction fails, in
+         * which case the caller falls back to the real implementation
+         * rather than crashing the guest.
+         */
+        private static Object newParceledListSlice() {
+            try {
+                Class<?> sliceClass =
+                        Class.forName("android.content.pm.ParceledListSlice");
+                return sliceClass.getConstructor(java.util.List.class)
+                        .newInstance(new ArrayList<>());
+            } catch (Throwable t) {
+                Log.w(TAG, "ParceledListSlice reflection failed", t);
+                return null;
+            }
         }
     }
 

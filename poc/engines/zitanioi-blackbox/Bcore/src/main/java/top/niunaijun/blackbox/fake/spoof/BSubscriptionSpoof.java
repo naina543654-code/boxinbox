@@ -25,17 +25,26 @@ import top.niunaijun.blackbox.utils.Slog;
  * <p>Hooks (all Pine, public-API choke point):
  * <ul>
  *   <li>{@code SubscriptionManager.getActiveSubscriptionInfoList()} →
- *       empty list when a profile is active (mirrors the cell-privacy
- *       treatment of {@code getAllCellInfo}).</li>
+ *       empty list (mirrors the cell-privacy treatment of
+ *       {@code getAllCellInfo}).</li>
  *   <li>{@code SubscriptionManager.getActiveSubscriptionInfo(int)} and
  *       {@code getActiveSubscriptionInfoForSimSlotIndex(int)} → null.</li>
+ *   <li>{@code SubscriptionManager.getPhoneNumber(int)} and
+ *       {@code getPhoneNumber(int, int)} → per-identity MSISDN
+ *       (re-audit 2026-10-04: public-API bypass of the line1Number hooks).</li>
  *   <li>{@code SubscriptionInfo.getNumber()} → per-identity MSISDN.</li>
  *   <li>{@code SubscriptionInfo.getIccId()} → per-identity ICCID.</li>
+ *   <li>{@code SubscriptionInfo.getGroupUuid()} → null (stable SIM link
+ *       otherwise).</li>
+ *   <li>{@code SubscriptionInfo.getCardId()} → per-identity deterministic
+ *       int (primitive; cannot return null, so a derived value replaces
+ *       the hardware-tied one).</li>
  * </ul>
  *
- * <p>Fail-closed for number-like values: null when no profile is active (a
- * null MSISDN/ICCID is plausible on real devices; the real SIM's would be a
- * cross-identity link).
+ * <p>Fully fail-closed: the spoofed values are served unconditionally.
+ * Guests never run without an active identity, and a null/empty/passthrough
+ * subscription state is plausible on real devices (no-SIM, airplane mode).
+ * The real SIM values are never visible to a guest, active profile or not.
  */
 public final class BSubscriptionSpoof {
     private static final String TAG = "BSubscriptionSpoof";
@@ -58,8 +67,13 @@ public final class BSubscriptionSpoof {
                 hookManagerMethod("getActiveSubscriptionInfo", new Class<?>[]{int.class}, false);
                 hookManagerMethod("getActiveSubscriptionInfoForSimSlotIndex",
                         new Class<?>[]{int.class}, false);
+                hookManagerNumberMethod("getPhoneNumber", new Class<?>[]{int.class});
+                hookManagerNumberMethod("getPhoneNumber",
+                        new Class<?>[]{int.class, int.class});
                 hookInfoGetter("getNumber", true);
                 hookInfoGetter("getIccId", false);
+                hookInfoGetter("getGroupUuid", false, true);
+                hookInfoCardId();
                 sInstalled = true;
                 Slog.d(TAG, "SubscriptionManager/SubscriptionInfo hooks installed");
             } catch (Throwable t) {
@@ -85,9 +99,7 @@ public final class BSubscriptionSpoof {
             Pine.hook(target, new MethodHook() {
                 @Override
                 public void beforeCall(Pine.CallFrame callFrame) {
-                    if (!BSpoofManager.get().isSpoofActive()) {
-                        return;
-                    }
+                    // Fail closed: never expose the real subscription state.
                     callFrame.setResult(list ? Collections.emptyList() : null);
                 }
             });
@@ -96,8 +108,41 @@ public final class BSubscriptionSpoof {
         }
     }
 
-    /** @param number true for getNumber (→ MSISDN), false for getIccId (→ ICCID). */
-    private static void hookInfoGetter(String name, final boolean number) {
+    /**
+     * SubscriptionManager.getPhoneNumber(...) → per-identity MSISDN, fail closed
+     * (null when no profile is active rather than the real SIM number).
+     */
+    private static void hookManagerNumberMethod(String name, Class<?>[] params) {
+        final Method target;
+        try {
+            target = SubscriptionManager.class.getDeclaredMethod(name, params);
+        } catch (Throwable t) {
+            Slog.e(TAG, "SubscriptionManager." + name + " not found; skipping", t);
+            return;
+        }
+        try {
+            Pine.hook(target, new MethodHook() {
+                @Override
+                public void beforeCall(Pine.CallFrame callFrame) {
+                    BSpoofManager spoof = BSpoofManager.get();
+                    if (!spoof.isSpoofActive()) {
+                        // Fail closed: null, never the real SIM number.
+                        callFrame.setResult(null);
+                        return;
+                    }
+                    callFrame.setResult(spoof.getPhoneNumber());
+                }
+            });
+        } catch (Throwable t) {
+            Slog.e(TAG, "Pine hook on SubscriptionManager." + name + " failed", t);
+        }
+    }
+
+    /**
+     * @param number    true for getNumber (→ MSISDN), false for getIccId (→ ICCID).
+     * @param nullValue when true, always serve null instead of a spoofed value.
+     */
+    private static void hookInfoGetter(String name, final boolean number, final boolean nullValue) {
         final Method target;
         try {
             target = SubscriptionInfo.class.getDeclaredMethod(name);
@@ -109,17 +154,55 @@ public final class BSubscriptionSpoof {
             Pine.hook(target, new MethodHook() {
                 @Override
                 public void beforeCall(Pine.CallFrame callFrame) {
+                    if (nullValue) {
+                        callFrame.setResult(null);
+                        return;
+                    }
                     BSpoofManager spoof = BSpoofManager.get();
                     if (!spoof.isSpoofActive()) {
+                        // Fail closed: null, never the real SIM value.
+                        callFrame.setResult(null);
                         return;
                     }
                     String value = number ? spoof.getPhoneNumber() : spoof.getSimSerial();
-                    // Fail closed: null, never the real SIM value.
                     callFrame.setResult(value);
                 }
             });
         } catch (Throwable t) {
             Slog.e(TAG, "Pine hook on SubscriptionInfo." + name + " failed", t);
+        }
+    }
+
+    /** @param number true for getNumber (→ MSISDN), false for getIccId (→ ICCID). */
+    private static void hookInfoGetter(String name, final boolean number) {
+        hookInfoGetter(name, number, false);
+    }
+
+    /**
+     * SubscriptionInfo.getCardId() returns a primitive int, so null is not an
+     * option. Serve a per-identity deterministic value derived from the
+     * Android ID instead of the hardware-tied card id.
+     */
+    private static void hookInfoCardId() {
+        final Method target;
+        try {
+            target = SubscriptionInfo.class.getDeclaredMethod("getCardId");
+        } catch (Throwable t) {
+            Slog.e(TAG, "SubscriptionInfo.getCardId not found; skipping", t);
+            return;
+        }
+        try {
+            Pine.hook(target, new MethodHook() {
+                @Override
+                public void beforeCall(Pine.CallFrame callFrame) {
+                    BSpoofManager spoof = BSpoofManager.get();
+                    String seed = spoof.isSpoofActive() ? spoof.getAndroidId() : "inactive";
+                    int fake = Math.abs(("cardid-" + seed).hashCode());
+                    callFrame.setResult(fake);
+                }
+            });
+        } catch (Throwable t) {
+            Slog.e(TAG, "Pine hook on SubscriptionInfo.getCardId failed", t);
         }
     }
 }

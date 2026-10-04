@@ -10,7 +10,8 @@ import top.canyie.pine.callback.MethodHook;
 import top.niunaijun.blackbox.utils.Slog;
 
 /**
- * Spoofs {@code MediaDrm.getPropertyByteArray("deviceUniqueId")} (Widevine).
+ * Spoofs {@code MediaDrm.getPropertyByteArray("deviceUniqueId")} (Widevine)
+ * and {@code MediaDrm.getPropertyString("systemId")}.
  *
  * <p>The real Widevine device ID is stable across identities <b>and</b>
  * factory resets, requires no permission, and is a favorite fingerprinting
@@ -64,12 +65,74 @@ public final class BSpoofMediaDrm {
                         }
                     }
                 });
+                hookSystemId();
                 sInstalled = true;
                 Slog.d(TAG, "MediaDrm.getPropertyByteArray hook installed");
             } catch (Throwable t) {
                 // Fail open: real Widevine ID remains visible.
                 Slog.e(TAG, "MediaDrm hook install failed", t);
             }
+        }
+    }
+
+    /**
+     * Re-audit 2026-10-04 (HIGH): the batch hooked {@code getPropertyByteArray}
+     * but missed the sibling {@code getPropertyString("systemId")} — the
+     * Widevine system ID is the same stable hardware identifier in string
+     * form. Served value: hex of SHA-256 over
+     * {@code "widevine-systemid-" + androidId} (stable within an identity,
+     * unique across identities, shaped like a real system ID).
+     */
+    private static void hookSystemId() {
+        final Method target;
+        try {
+            target = MediaDrm.class.getDeclaredMethod("getPropertyString", String.class);
+        } catch (Throwable t) {
+            Slog.e(TAG, "MediaDrm.getPropertyString not found; skipping", t);
+            return;
+        }
+        try {
+            Pine.hook(target, new MethodHook() {
+                @Override
+                public void beforeCall(Pine.CallFrame callFrame) {
+                    Object[] args = callFrame.args;
+                    if (args == null || args.length == 0
+                            || !"systemId".equals(args[0])) {
+                        return;
+                    }
+                    BSpoofManager spoof = BSpoofManager.get();
+                    if (!spoof.isSpoofActive()) {
+                        return;
+                    }
+                    String fake = systemIdFor(spoof);
+                    if (fake != null) {
+                        callFrame.setResult(fake);
+                    }
+                }
+            });
+            Slog.d(TAG, "MediaDrm.getPropertyString hook installed");
+        } catch (Throwable t) {
+            Slog.e(TAG, "MediaDrm.getPropertyString hook install failed", t);
+        }
+    }
+
+    /** Deterministic per-identity Widevine-style system ID (hex string). */
+    private static String systemIdFor(BSpoofManager spoof) {
+        try {
+            String androidId = spoof.getAndroidId();
+            if (androidId == null) {
+                return null;
+            }
+            MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+            byte[] digest = sha256.digest(
+                    ("widevine-systemid-" + androidId).getBytes("UTF-8"));
+            StringBuilder sb = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Throwable t) {
+            return null;
         }
     }
 

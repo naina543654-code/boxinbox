@@ -375,6 +375,21 @@ public class BAccountManagerService extends IBAccountManagerService.Stub impleme
         return removeAccountInternal(accounts, account);
     }
 
+    /**
+     * BoxInBox 2026-10-04 (re-audit HIGH): drop every account for a virtual
+     * user from the daemon's in-memory map and persist, so a Reset/Delete
+     * leaves no account visible in-session. Deleting accounts.conf from disk
+     * alone was only half the fix — mUserAccountsMap is loaded once at
+     * systemReady() and never re-read.
+     */
+    @Override
+    public void clearAccountsForUser(int userId) throws RemoteException {
+        synchronized (mUserAccountsMap) {
+            mUserAccountsMap.remove(userId);
+        }
+        saveAllAccounts();
+    }
+
     @Override
     public void copyAccountToUser(IAccountManagerResponse response, Account account, int userFrom, int userTo) throws RemoteException {
         final BUserAccounts fromAccounts = getUserAccounts(userFrom);

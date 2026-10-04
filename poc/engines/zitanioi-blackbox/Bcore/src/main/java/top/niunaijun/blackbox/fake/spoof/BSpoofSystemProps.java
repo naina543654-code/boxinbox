@@ -141,6 +141,16 @@ public final class BSpoofSystemProps {
         if (key.equals("ro.serialno")) {
             return spoof.getSerial();
         }
+        // Re-audit 2026-10-04: ro.boot.serialno exposes the same hardware
+        // serial (boot properties are readable with zero permission).
+        if (key.equals("ro.boot.serialno")) {
+            return spoof.getSerial();
+        }
+        // Re-audit 2026-10-04: gsm.version.baseband leaked at this Java layer
+        // (the BSpoofManager table only covered the getprop/exec path).
+        if (key.equals("gsm.version.baseband")) {
+            return spoof.getBuildField("RADIO");
+        }
         return null;
     }
 

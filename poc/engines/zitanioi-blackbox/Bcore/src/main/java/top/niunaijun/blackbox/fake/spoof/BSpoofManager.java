@@ -407,6 +407,9 @@ public class BSpoofManager {
             // Real serial is stable across identities and zero-permission;
             // never pass it through when a profile is active.
             case "ro.serialno": return mSerial;
+            // Re-audit 2026-10-04: ro.boot.serialno is the same hardware
+            // serial in the boot properties (zero-permission read).
+            case "ro.boot.serialno": return mSerial;
             // Build.getRadioVersion() reads this property directly, bypassing
             // the patched Build.RADIO static field.
             case "gsm.version.baseband": return mBuildFields.get("RADIO");

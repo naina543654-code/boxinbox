@@ -433,6 +433,23 @@ class BlackBoxRuntime : SandboxRuntime {
         }
         trace("phase=stop: end")
 
+        // 2b. Re-audit 2026-10-04 (HIGH): clear the daemon's in-memory
+        //     account map for the virtual user BEFORE the uninstall sweep.
+        //     Deleting accounts.conf from disk (phase 6) alone leaves the
+        //     in-memory BUserAccounts visible in-session, so a re-cloned GMS
+        //     could rediscover the previous identity's accounts.
+        trace("phase=clear-accounts: start")
+        runCatching {
+            ipc("clearAccountsForUser", 20) {
+                top.niunaijun.blackbox.fake.frameworks.BAccountManager.get()
+                    .clearAccountsForUser(VIRTUAL_USER_ID)
+            }
+        }.onSuccess { trace("phase=clear-accounts: end (daemon account map cleared)") }
+            .onFailure {
+                trace("phase=clear-accounts: FAILED (${it.message}); " +
+                    "continuing — disk wipe still removes accounts.conf")
+            }
+
         // 3. Isolated per-package uninstall while user 0 exists. A failed
         //    IPC aborts loudly (the daemon is not cooperating; further
         //    calls would just burn timeouts). Silent no-ops (service
