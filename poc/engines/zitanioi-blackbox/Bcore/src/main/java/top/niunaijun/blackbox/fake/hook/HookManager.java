@@ -61,6 +61,8 @@ import top.niunaijun.blackbox.fake.spoof.OsIdentitySpoofInjector;
 import top.niunaijun.blackbox.fake.spoof.NetworkSpoofInjector;
 import top.niunaijun.blackbox.fake.spoof.AaidSpoofInjector;
 import top.niunaijun.blackbox.fake.spoof.RootHideInjector;
+import top.niunaijun.blackbox.fake.spoof.SubscriptionSpoofInjector;
+import top.niunaijun.blackbox.fake.spoof.MediaDrmSpoofInjector;
 import top.niunaijun.blackbox.utils.Slog;
 import top.niunaijun.blackbox.utils.compat.BuildCompat;
 
@@ -143,6 +145,13 @@ public class HookManager {
             // cross-identity link. No-op without an active profile.
             addInjector(new AaidSpoofInjector());
             addInjector(new RootHideInjector());
+            // Audit fix 2026-10-04: SubscriptionManager/SubscriptionInfo had no
+            // ISub proxy — real MSISDN/ICCID leaked around the getLine1Number
+            // fix. Pine hooks serve the per-identity values instead.
+            addInjector(new SubscriptionSpoofInjector());
+            // Audit fix 2026-10-04: Widevine deviceUniqueId (stable across
+            // factory resets, zero permission) was unhooked.
+            addInjector(new MediaDrmSpoofInjector());
             addInjector(new IStorageManagerProxy());
             addInjector(new ILauncherAppsProxy());
             addInjector(new IJobServiceProxy());

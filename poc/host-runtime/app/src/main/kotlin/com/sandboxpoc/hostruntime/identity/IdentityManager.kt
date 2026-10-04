@@ -42,6 +42,15 @@ class IdentityManager(
         require(existing == null) {
             "Identity ${existing!!.id} already exists — reset or delete it first"
         }
+        // Audit fix 2026-10-04: loadIdentity() returns null on a missing OR
+        // unparseable identity.json, so a corrupted record used to let
+        // generateIdentity() build a NEW identity over a NEVER-WIPED virtual
+        // user — old cloned apps and their data silently inherited. Refuse
+        // and wipe first instead.
+        if (runtime.hasLeftoverGuestState()) {
+            log.w("identity", "leftover guest state with no identity record — wiping before generate")
+            attempt("destroy") { runtime.destroy() }
+        }
         val identityId = UUID.randomUUID().toString()
         val spoof = ProfileGenerator.newProfile(profileId = identityId)
         val violations = ProfileValidator.validateSpoof(spoof)

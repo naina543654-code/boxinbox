@@ -1,11 +1,8 @@
 package com.sandboxpoc.hostruntime.ui
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
-import android.widget.LinearLayout
-import android.widget.Toast
 import com.sandboxpoc.hostruntime.R
 import com.sandboxpoc.hostruntime.SandboxApp
 import com.sandboxpoc.hostruntime.runtime.BlackBoxRuntime
@@ -26,42 +23,64 @@ class HomeActivity : Activity() {
 
     private fun render() {
         val root = Ui.screen(this)
-        root.addView(Ui.title(this, "Sandbox PoC"))
+        root.addView(Ui.title(this, "BoxInBox"))
+        root.addView(Ui.subtitle(this, "Privacy sandbox · PoC"))
+
         val identity = app.identities.activeIdentity()
         val status = app.identities.runtimeStatus()
 
-        root.addView(Ui.section(this, "Status"))
-        root.addView(Ui.row(this, "Runtime: $status"))
         if (identity == null) {
-            root.addView(Ui.row(this, "Identity: none — generate one to begin"))
+            val card = Ui.card(this)
+            card.addView(Ui.cardTitle(this, "No identity yet"))
+            card.addView(Ui.subtitle(this,
+                "Generate an identity to create a fresh virtual device."))
+            card.addView(Ui.button(this, "Generate Identity") { onGenerate() })
+            root.addView(card)
         } else {
             val p = identity.profile
-            root.addView(Ui.row(this, "Identity: ${identity.id.take(8)}… (${identity.state})"))
-            root.addView(Ui.row(this, "Device: ${p.manufacturer} ${p.model}"))
-            root.addView(Ui.row(this, "Android ${p.androidVersion} (API ${p.apiLevel})"))
-            root.addView(Ui.row(this, "ANDROID_ID: ${identity.spoofProfile.androidId}"))
-        }
-        if (status.name == "ERROR") {
-            val err = (app.runtime as? BlackBoxRuntime)?.lastError()
-            root.addView(Ui.row(this, "Note: the engine reported an error — see log." +
-                (if (err != null) " Last: $err" else "")))
+            val sp = identity.spoofProfile
+            val card = Ui.card(this)
+            card.addView(Ui.cardHeader(this, "Active Identity",
+                Ui.statePill(this, identity.state.name,
+                    identity.state.name == "ACTIVE")))
+            card.addView(Ui.kvRow(this, "Device",
+                "${p.manufacturer} ${p.model}"))
+            card.addView(Ui.kvRow(this, "Android",
+                "${p.androidVersion} (API ${p.apiLevel})"))
+            card.addView(Ui.kvRow(this, "Operator",
+                "${sp.telephony.operatorName} · ${sp.telephony.countryIso.uppercase()}"))
+            val city = sp.locale.timezoneId.substringAfterLast('/', "")
+            if (city.isNotEmpty()) {
+                card.addView(Ui.kvRow(this, "Location", city))
+            }
+            card.addView(Ui.kvRow(this, "ANDROID_ID",
+                "${sp.androidId.take(8)}…"))
+            card.addView(Ui.kvRow(this, "Runtime", status.toString()))
+            root.addView(card)
+
+            if (status.name == "ERROR") {
+                val err = (app.runtime as? BlackBoxRuntime)?.lastError()
+                root.addView(Ui.subtitle(this, "Note: the engine reported an error — see log." +
+                    (if (err != null) " Last: $err" else "")))
+            }
         }
 
         root.addView(Ui.section(this, "Actions"))
-        val genBtn = Ui.button(this, "Generate Identity") { onGenerate() }
-        genBtn.isEnabled = identity == null
-        root.addView(genBtn)
         if (identity != null) {
-            root.addView(Ui.row(this, "Generate is disabled while an identity exists — " +
-                "reset or delete it in Manage Identity first."))
+            // Generate is hidden while an identity exists — reset or delete
+            // it in Manage Identity first.
+            root.addView(Ui.subtitle(this,
+                "Generate is unavailable while an identity exists — " +
+                    "reset or delete it in Manage Identity first."))
         }
         root.addView(Ui.button(this, "Manage Identity") {
             startActivity(Intent(this, ManageIdentityActivity::class.java))
         })
-        root.addView(Ui.button(this, "Settings") {
+        root.addView(Ui.secondaryButton(this, "Settings") {
             startActivity(Intent(this, SettingsActivity::class.java))
         })
-        root.addView(Ui.row(this, "Build: ${getString(R.string.build_version)}"))
+
+        root.addView(Ui.footnote(this, "Build ${getString(R.string.build_version)}"))
 
         setContentView(Ui.page(root))
     }

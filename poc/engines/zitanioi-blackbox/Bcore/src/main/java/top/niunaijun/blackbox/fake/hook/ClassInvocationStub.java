@@ -117,7 +117,21 @@ public abstract class ClassInvocationStub implements InvocationHandler, IInjectH
         if (result != null) {
             return result;
         }
-        result = methodHook.hook(mBase, method, args);
+        // Audit fix 2026-10-04: a hook-body exception used to propagate to
+        // the guest (possible crash). Fail open to the real method instead —
+        // a leak is preferable to a crash, and the failure is visible in
+        // logcat for diagnosis.
+        try {
+            result = methodHook.hook(mBase, method, args);
+        } catch (Throwable t) {
+            android.util.Log.w("ClassInvocationStub",
+                    "hook " + method.getName() + " threw; falling back to real", t);
+            try {
+                return method.invoke(mBase, args);
+            } catch (Throwable e) {
+                throw e.getCause();
+            }
+        }
         result = methodHook.afterHook(result);
         return result;
     }

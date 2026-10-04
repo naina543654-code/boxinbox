@@ -46,6 +46,14 @@ public class IDeviceIdentifiersPolicyProxy extends BinderInvocationStub {
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
 //                args[0] = BlackBoxCore.getHostPkg();
 //                return method.invoke(who, args);
+            // Audit fix 2026-10-04: the md5(hostPkg) fake was identical across
+            // identities. Gate on the profile: per-identity serial when
+            // active, legacy stable fake when not (never the real serial).
+            top.niunaijun.blackbox.fake.spoof.BSpoofManager spoof =
+                    top.niunaijun.blackbox.fake.spoof.BSpoofManager.get();
+            if (spoof.isSpoofActive() && spoof.getSerial() != null) {
+                return spoof.getSerial();
+            }
             return Md5Utils.md5(BlackBoxCore.getHostPkg());
         }
     }

@@ -205,6 +205,19 @@ internal fun newSimSerial(): String {
 }
 
 /**
+ * Random per-identity serial: 16 uppercase hex chars. Real serials are
+ * stable across identities and readable with zero permission, so every
+ * identity gets a fresh one (served via Build.SERIAL, ro.serialno and
+ * getSerialForPackage).
+ */
+internal fun newSerial(): String {
+    val r = java.security.SecureRandom()
+    val sb = StringBuilder()
+    repeat(16) { sb.append("0123456789ABCDEF"[r.nextInt(16)]) }
+    return sb.toString()
+}
+
+/**
  * Country calling code + typical national mobile-number length, keyed by the
  * profile country ISO. Used to generate a plausible per-identity MSISDN so
  * guests never see the host SIM's real number (a stable cross-identity
@@ -1233,6 +1246,8 @@ data class SpoofProfile(
         val socModel: String,
         /** Prebuilt WebView default user-agent (model + build ID already spoofed). */
         val webViewUa: String,
+        /** Per-identity serial: Build.SERIAL, ro.serialno, getSerialForPackage. */
+        val serial: String,
     )
 
     data class Movement(
@@ -1321,7 +1336,8 @@ data class SpoofProfile(
         jname("radio"); append(':'); jstr(device.radio); append(',')
         jname("socManufacturer"); append(':'); jstr(device.socManufacturer); append(',')
         jname("socModel"); append(':'); jstr(device.socModel); append(',')
-        jname("webViewUa"); append(':'); jstr(device.webViewUa)
+        jname("webViewUa"); append(':'); jstr(device.webViewUa); append(',')
+        jname("serial"); append(':'); jstr(device.serial)
         append("},")
         jname("androidId"); append(':'); jstr(androidId); append(',')
         append("\"location\":{")
@@ -1432,6 +1448,7 @@ data class SpoofProfile(
         prop("ro.build.fingerprint", d.fingerprint)
         prop("ro.soc.manufacturer", d.socManufacturer)
         prop("ro.soc.model", d.socModel)
+        prop("ro.serialno", d.serial)
         prop("ro.debuggable", "0")
         prop("ro.secure", "1")
         // Real, non-identifying hardware facts (same on any arm64 phone).
@@ -1520,6 +1537,10 @@ data class SpoofProfile(
                             getStr(d, "model"),
                             buildId,
                         ),
+                    // Strict: a profile without a serial is rejected rather
+                    // than given a fabricated one — the serial must be stable
+                    // for the life of the identity.
+                    serial = getStr(d, "serial"),
                     )
                 },
                 androidId = getStr(root, "androidId"),
@@ -1549,13 +1570,13 @@ data class SpoofProfile(
                     ssid = getStr(n, "ssid"),
                     bssid = getStr(n, "bssid"),
                     transport = getStr(n, "transport"),
-                    // Tolerant: profiles persisted before 2026-10-02 lack
-                    // these; derive fresh random values so old identities
-                    // still get coherent spoofing.
-                    wifiMac = (n["wifiMac"] as? String)
-                        ?.takeIf { it.isNotEmpty() } ?: newLocalMac(),
-                    bluetoothMac = (n["bluetoothMac"] as? String)
-                        ?.takeIf { it.isNotEmpty() } ?: newLocalMac(),
+                    // Strict (audit 2026-10-04): fabricating fresh random
+                    // values per parse made load→save round-trips unstable
+                    // and let a truncated JSON load as a coherent-looking
+                    // wrong identity. These are identity-critical; a profile
+                    // without them is rejected.
+                    wifiMac = getStr(n, "wifiMac"),
+                    bluetoothMac = getStr(n, "bluetoothMac"),
                 ),
                 telephony = TelephonyInfo(
                     operatorName = getStr(t, "operatorName"),
@@ -1566,13 +1587,11 @@ data class SpoofProfile(
                     // (e.g. pre-2026-10-01 identities) default to LTE.
                     networkType = (t["networkType"] as? Number)?.toInt() ?: 13,
                     subscriberId = getStr(t, "subscriberId"),
-                    simSerial = (t["simSerial"] as? String)
-                        ?.takeIf { it.isNotEmpty() } ?: newSimSerial(),
-                    // Tolerant: profiles persisted before phoneNumber existed
-                    // get a fresh per-identity number rather than failing.
-                    phoneNumber = (t["phoneNumber"] as? String)
-                        ?.takeIf { it.isNotEmpty() }
-                        ?: newPhoneNumber(getStr(t, "countryIso")),
+                    // Strict (audit 2026-10-04): same rationale as the MAC
+                    // fields above — never fabricate identity-critical
+                    // values at parse time.
+                    simSerial = getStr(t, "simSerial"),
+                    phoneNumber = getStr(t, "phoneNumber"),
                 ),
                 locale = run {
                     val lo = root["locale"] as? Map<*, *>

@@ -4,7 +4,10 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
-import android.widget.Toast
+import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.LinearLayout
+import android.widget.TextView
 import com.sandboxpoc.hostruntime.SandboxApp
 import com.sandboxpoc.hostruntime.runtime.BlackBoxRuntime
 
@@ -54,100 +57,142 @@ class ManageIdentityActivity : Activity() {
 
         val identity = app.identities.activeIdentity()
         if (identity == null) {
-            root.addView(Ui.row(this, "No active identity. Generate one from Home."))
+            val card = Ui.card(this)
+            card.addView(Ui.cardTitle(this, "No active identity"))
+            card.addView(Ui.subtitle(this, "Generate one from Home to begin."))
+            root.addView(card)
             setContentView(Ui.page(root))
             return
         }
         val p = identity.profile
         val sp = identity.spoofProfile
 
-        root.addView(Ui.section(this, "Identity"))
-        root.addView(Ui.mono(this, "id:        ${identity.id}"))
-        root.addView(Ui.mono(this, "state:     ${identity.state}"))
-        root.addView(Ui.mono(this, "runtime:   ${app.identities.runtimeStatus()}"))
+        // -- Summary card -------------------------------------------------
+        val card = Ui.card(this)
+        card.addView(Ui.cardHeader(this, "Identity",
+            Ui.statePill(this, identity.state.name, identity.state.name == "ACTIVE")))
+        card.addView(Ui.kvRow(this, "ID", "${identity.id.take(8)}…"))
+        card.addView(Ui.kvRow(this, "Device", "${p.manufacturer} ${p.model}"))
+        card.addView(Ui.kvRow(this, "Android", "${p.androidVersion} (API ${p.apiLevel})"))
+        card.addView(Ui.kvRow(this, "Runtime", app.identities.runtimeStatus().toString()))
+        root.addView(card)
 
-        root.addView(Ui.section(this, "Device profile"))
-        root.addView(Ui.mono(this, "manufacturer: ${p.manufacturer}"))
-        root.addView(Ui.mono(this, "brand:        ${p.brand}"))
-        root.addView(Ui.mono(this, "model:        ${p.model}"))
-        root.addView(Ui.mono(this, "device:       ${p.device}"))
-        root.addView(Ui.mono(this, "product:      ${p.product}"))
-        root.addView(Ui.mono(this, "android:      ${p.androidVersion} (API ${p.apiLevel})"))
-        root.addView(Ui.mono(this, "build:        ${p.buildId} ${p.buildType} ${p.buildTags}"))
-        root.addView(Ui.mono(this, "fingerprint:"))
-        root.addView(Ui.mono(this, "  ${p.fingerprint}"))
+        // -- Technical details (the full mono dump, collapsed by default) -
+        root.addView(Ui.collapsible(this, "Technical details") { c ->
+            c.addView(Ui.mono(this, "id:        ${identity.id}"))
+            c.addView(Ui.mono(this, "state:     ${identity.state}"))
+            c.addView(Ui.mono(this, "runtime:   ${app.identities.runtimeStatus()}"))
+            c.addView(Ui.mono(this, "manufacturer: ${p.manufacturer}"))
+            c.addView(Ui.mono(this, "brand:        ${p.brand}"))
+            c.addView(Ui.mono(this, "model:        ${p.model}"))
+            c.addView(Ui.mono(this, "device:       ${p.device}"))
+            c.addView(Ui.mono(this, "product:      ${p.product}"))
+            c.addView(Ui.mono(this, "android:      ${p.androidVersion} (API ${p.apiLevel})"))
+            c.addView(Ui.mono(this, "build:        ${p.buildId} ${p.buildType} ${p.buildTags}"))
+            c.addView(Ui.mono(this, "fingerprint:"))
+            c.addView(Ui.mono(this, "  ${p.fingerprint}"))
+            c.addView(Ui.mono(this, "profileId:    ${sp.profileId}"))
+            c.addView(Ui.mono(this, "generatedAt:  ${sp.generatedAt}"))
+            c.addView(Ui.mono(this, "androidId:    ${sp.androidId}"))
+            c.addView(Ui.mono(this, "location:     ${sp.location.latitude}, ${sp.location.longitude}"))
+            c.addView(Ui.mono(this, "              movement=${sp.location.movement.enabled}"))
+            c.addView(Ui.mono(this, "telephony:    ${sp.telephony.operatorName} " +
+                "${sp.telephony.operatorNumeric}/${sp.telephony.countryIso}"))
+            c.addView(Ui.mono(this, "deviceId:     ${sp.telephony.deviceId}"))
+            c.addView(Ui.mono(this, "subscriberId: ${sp.telephony.subscriberId}"))
+            c.addView(Ui.mono(this, "sensors:      ${sp.sensors.size} " +
+                "(types ${sp.sensors.joinToString(",") { it.type.toString() }})"))
+            c.addView(Ui.mono(this, "network:      ${sp.network.ssid} ${sp.network.bssid} ${sp.network.transport}"))
+        })
 
-        root.addView(Ui.section(this, "Spoof profile (profiles/active_profile.json)"))
-        root.addView(Ui.mono(this, "profileId:    ${sp.profileId}"))
-        root.addView(Ui.mono(this, "generatedAt:  ${sp.generatedAt}"))
-        root.addView(Ui.mono(this, "androidId:    ${sp.androidId}"))
-        root.addView(Ui.mono(this, "location:     ${sp.location.latitude}, ${sp.location.longitude}"))
-        root.addView(Ui.mono(this, "              movement=${sp.location.movement.enabled}"))
-        root.addView(Ui.mono(this, "telephony:    ${sp.telephony.operatorName} " +
-            "${sp.telephony.operatorNumeric}/${sp.telephony.countryIso}"))
-        root.addView(Ui.mono(this, "deviceId:     ${sp.telephony.deviceId}"))
-        root.addView(Ui.mono(this, "subscriberId: ${sp.telephony.subscriberId}"))
-        root.addView(Ui.mono(this, "sensors:      ${sp.sensors.size} " +
-            "(types ${sp.sensors.joinToString(",") { it.type.toString() }})"))
-        root.addView(Ui.mono(this, "network:      ${sp.network.ssid} ${sp.network.bssid} ${sp.network.transport}"))
-
-        root.addView(Ui.section(this, "Capabilities"))
+        // -- Capabilities ---------------------------------------------------
+        val capCard = Ui.card(this)
+        capCard.addView(Ui.cardTitle(this, "Capabilities"))
         app.capabilities.all().forEach { cap ->
-            root.addView(Ui.row(this, "• ${cap.displayName}: ${cap.state}"))
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                val v = Ui.dp(this@ManageIdentityActivity, 4)
+                setPadding(0, v, 0, v)
+            }
+            row.addView(TextView(this).apply {
+                text = cap.displayName
+                textSize = 14f
+                setTextColor(Ui.TEXT)
+                layoutParams = LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            row.addView(Ui.capabilityPill(this, cap.state))
+            capCard.addView(row)
         }
+        root.addView(capCard)
 
+        // -- Guest applications ----------------------------------------------
         root.addView(Ui.section(this, "Guest applications"))
-        root.addView(Ui.button(this, "Clone Application…") {
+        root.addView(Ui.secondaryButton(this, "Clone Application…") {
             startActivity(Intent(this, AppPickerActivity::class.java))
         })
         val bb = app.runtime as? BlackBoxRuntime
         if (bb != null) {
             val guestList = guests
             val labels = app.storage.guestLabels(identity.id)
-            if (guestList == null) {
-                root.addView(Ui.row(this, "Loading cloned apps…"))
-            } else {
-                // Only the apps the user cloned — the engine's Google Play
-                // Services clones are hidden here (see Settings → Advanced).
-                val userGuests = guestList.filter { !bb.isGmsPackage(it) }
-                if (userGuests.isEmpty()) {
-                    root.addView(Ui.row(this, "No apps cloned in this identity."))
-                } else {
-                    userGuests.forEach { pkg ->
-                        root.addView(Ui.row(this, labels[pkg] ?: pkg))
-                        root.addView(Ui.button(this, "Launch") {
-                            launchGuestWithProfile(pkg)
-                        })
-                        root.addView(Ui.button(this, "Uninstall") {
-                            Ui.bg(this, work = {
-                                app.runtime.uninstallApplication(pkg)
-                                "OK: uninstalled $pkg"
-                            }, onDone = { guests = null; loadGuests() })
-                        })
+            when {
+                guestList == null ->
+                    root.addView(Ui.subtitle(this, "Loading cloned apps…"))
+                else -> {
+                    // Only the apps the user cloned — the engine's Google Play
+                    // Services clones are hidden here (see Settings).
+                    val userGuests = guestList.filter { !bb.isGmsPackage(it) }
+                    if (userGuests.isEmpty()) {
+                        root.addView(Ui.subtitle(this, "No apps cloned in this identity."))
+                    } else {
+                        userGuests.forEach { pkg ->
+                            val gcard = Ui.card(this)
+                            gcard.addView(TextView(this).apply {
+                                text = labels[pkg] ?: pkg
+                                textSize = 15f
+                                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                                setTextColor(Ui.TEXT)
+                            })
+                            gcard.addView(Ui.subtitle(this, pkg))
+                            gcard.addView(Ui.buttonRow(this,
+                                Ui.secondaryButton(this, "Launch", 1f) {
+                                    launchGuestWithProfile(pkg)
+                                },
+                                Ui.dangerButton(this, "Uninstall", 1f) {
+                                    Ui.bg(this, work = {
+                                        app.runtime.uninstallApplication(pkg)
+                                        "OK: uninstalled $pkg"
+                                    }, onDone = { guests = null; loadGuests() })
+                                }))
+                            root.addView(gcard)
+                        }
                     }
                 }
             }
-            root.addView(Ui.divider(this))
-            root.addView(Ui.button(this, "Stop runtime") {
-                Ui.bg(this, work = { app.runtime.stop(); "OK: runtime stopped" }, onDone = { render() })
-            })
-            root.addView(Ui.button(this, "Start runtime") {
-                Ui.bg(this, work = { app.runtime.start(); "OK: runtime started" }, onDone = { render() })
-            })
         } else {
+            val infoCard = Ui.card(this)
+            infoCard.addView(Ui.cardTitle(this, "Guest state"))
             val staged = app.storage.stagedApks(identity.id)
             val guestDirs = app.storage.guestApps(identity.id)
             if (staged.isEmpty() && guestDirs.isEmpty()) {
-                root.addView(Ui.row(this, "No guest apps staged."))
+                infoCard.addView(Ui.subtitle(this, "No guest apps staged."))
             } else {
-                staged.forEach { f -> root.addView(Ui.row(this, "staged APK: ${f.name}")) }
-                guestDirs.forEach { d -> root.addView(Ui.row(this, "guest state: $d")) }
+                staged.forEach { f -> infoCard.addView(Ui.row(this, "staged APK: ${f.name}")) }
+                guestDirs.forEach { d -> infoCard.addView(Ui.row(this, "guest state: $d")) }
             }
+            root.addView(infoCard)
         }
 
-        root.addView(Ui.divider(this))
-        root.addView(Ui.button(this, "Reset Identity") { confirmReset() })
-        root.addView(Ui.button(this, "Delete Identity") { confirmDelete() })
+        // -- Danger zone ------------------------------------------------------
+        val danger = Ui.dangerCard(this)
+        danger.addView(Ui.cardTitle(this, "Danger zone", Ui.RED))
+        danger.addView(Ui.subtitle(this,
+            "Reset or delete destroys the runtime and ALL guest state. This cannot be undone."))
+        danger.addView(Ui.buttonRow(this,
+            Ui.dangerButton(this, "Reset Identity", 1f) { confirmReset() },
+            Ui.dangerButton(this, "Delete Identity", 1f) { confirmDelete() }))
+        root.addView(danger)
 
         setContentView(Ui.page(root))
     }

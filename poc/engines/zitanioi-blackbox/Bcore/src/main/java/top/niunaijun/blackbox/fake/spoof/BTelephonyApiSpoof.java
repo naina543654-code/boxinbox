@@ -60,6 +60,26 @@ public final class BTelephonyApiSpoof {
                 // on some framework builds. The real SIM number must never
                 // leak: it is identical across identities.
                 hookLine1Number();
+                // Device/subscriber identifiers at the public-API choke point.
+                // The ITelephony @ProxyMethod("getSubscriberId") and
+                // @ProxyMethod("getSimSerialNumber") names do not exist on the
+                // API 34 AIDL (verified against AOSP android14-release), so
+                // those binder hooks are dead — the Pine hooks below are the
+                // live enforcement for the exact APIs apps call.
+                hookStringGetter("getSubscriberId", new Class<?>[0], ValueKind.SUBSCRIBER_ID);
+                hookStringGetter("getSubscriberId", new Class<?>[]{int.class}, ValueKind.SUBSCRIBER_ID);
+                hookStringGetter("getSimSerialNumber", new Class<?>[0], ValueKind.SIM_SERIAL);
+                hookStringGetter("getSimSerialNumber", new Class<?>[]{int.class}, ValueKind.SIM_SERIAL);
+                hookStringGetter("getImei", new Class<?>[0], ValueKind.DEVICE_ID);
+                hookStringGetter("getImei", new Class<?>[]{int.class}, ValueKind.DEVICE_ID);
+                hookStringGetter("getMeid", new Class<?>[0], ValueKind.DEVICE_ID);
+                hookStringGetter("getMeid", new Class<?>[]{int.class}, ValueKind.DEVICE_ID);
+                hookStringGetter("getDeviceId", new Class<?>[0], ValueKind.DEVICE_ID);
+                hookStringGetter("getDeviceId", new Class<?>[]{int.class}, ValueKind.DEVICE_ID);
+                // Voicemail number often equals the MSISDN — serve the
+                // per-identity number, fail closed to null when inactive.
+                hookStringGetter("getVoiceMailNumber", new Class<?>[0], ValueKind.PHONE_NUMBER);
+                hookStringGetter("getVoiceMailNumber", new Class<?>[]{int.class}, ValueKind.PHONE_NUMBER);
                 sInstalled = true;
                 Slog.d(TAG, "TelephonyManager operator API hooks installed");
             } catch (Throwable t) {
@@ -103,11 +123,27 @@ public final class BTelephonyApiSpoof {
 
     /** Hooks {@code TelephonyManager.getLine1Number()} to the per-identity MSISDN. */
     private static void hookLine1Number() {
+        hookStringGetter("getLine1Number", new Class<?>[0], ValueKind.PHONE_NUMBER);
+    }
+
+    /** Which per-identity profile value a hooked string getter serves. */
+    private enum ValueKind {
+        SUBSCRIBER_ID, SIM_SERIAL, DEVICE_ID, PHONE_NUMBER
+    }
+
+    /**
+     * Hooks a no/slot-arg {@code TelephonyManager} string getter to the
+     * per-identity profile value. Fail-closed for number-like values (null
+     * when inactive — a null MSISDN/IMSI/ICCID is plausible); device IDs keep
+     * the engine's legacy stable fake when no profile is active (the real
+     * IMEI must never leak, and a null there is less plausible).
+     */
+    private static void hookStringGetter(String name, Class<?>[] params, final ValueKind kind) {
         final Method target;
         try {
-            target = TelephonyManager.class.getDeclaredMethod("getLine1Number");
+            target = TelephonyManager.class.getDeclaredMethod(name, params);
         } catch (Throwable t) {
-            Slog.e(TAG, "TelephonyManager.getLine1Number not found; skipping", t);
+            Slog.e(TAG, "TelephonyManager." + name + "/" + params.length + " not found; skipping", t);
             return;
         }
         try {
@@ -115,17 +151,52 @@ public final class BTelephonyApiSpoof {
                 @Override
                 public void beforeCall(Pine.CallFrame callFrame) {
                     BSpoofManager spoof = BSpoofManager.get();
-                    if (!spoof.isSpoofActive()) {
-                        return;
+                    String value = null;
+                    boolean failClosedNull = false;
+                    switch (kind) {
+                        case SUBSCRIBER_ID:
+                            if (spoof.isSpoofActive()) {
+                                value = spoof.getSubscriberId();
+                            }
+                            failClosedNull = true;
+                            break;
+                        case SIM_SERIAL:
+                            if (spoof.isSpoofActive()) {
+                                value = spoof.getSimSerial();
+                            }
+                            failClosedNull = true;
+                            break;
+                        case PHONE_NUMBER:
+                            if (spoof.isSpoofActive()) {
+                                value = spoof.getPhoneNumber();
+                            }
+                            failClosedNull = true;
+                            break;
+                        case DEVICE_ID:
+                        default:
+                            if (spoof.isSpoofActive() && spoof.getTelephonyDeviceId() != null) {
+                                value = spoof.getTelephonyDeviceId();
+                            } else {
+                                value = md5HostPkg();
+                            }
+                            break;
                     }
-                    String number = spoof.getPhoneNumber();
-                    if (number != null) {
-                        callFrame.setResult(number);
+                    if (value != null || failClosedNull) {
+                        callFrame.setResult(value);
                     }
                 }
             });
         } catch (Throwable t) {
-            Slog.e(TAG, "Pine hook on TelephonyManager.getLine1Number failed", t);
+            Slog.e(TAG, "Pine hook on TelephonyManager." + name + " failed", t);
+        }
+    }
+
+    private static String md5HostPkg() {
+        try {
+            return top.niunaijun.blackbox.utils.Md5Utils.md5(
+                    top.niunaijun.blackbox.BlackBoxCore.getHostPkg());
+        } catch (Throwable t) {
+            return "000000000000000";
         }
     }
 }

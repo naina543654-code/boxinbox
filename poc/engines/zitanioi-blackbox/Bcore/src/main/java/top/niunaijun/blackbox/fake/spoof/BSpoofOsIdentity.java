@@ -42,16 +42,29 @@ import top.niunaijun.blackbox.utils.Slog;
  */
 public final class BSpoofOsIdentity {
     private static final String TAG = "BSpoofOsIdentity";
+    private static volatile boolean sInstalled = false;
 
     private BSpoofOsIdentity() {
     }
 
     public static void install() {
-        hookTimeZone();
-        hookLocale();
-        hookBluetooth();
-        hookWlan0Mac();
-        hookWebViewUa();
+        // Audit fix 2026-10-04: idempotency guard like the sibling modules —
+        // double registration would stack Pine hooks.
+        if (sInstalled) {
+            return;
+        }
+        synchronized (BSpoofOsIdentity.class) {
+            if (sInstalled) {
+                return;
+            }
+            hookTimeZone();
+            hookLocale();
+            hookBluetooth();
+            hookBondedDevices();
+            hookWlan0Mac();
+            hookWebViewUa();
+            sInstalled = true;
+        }
     }
 
     private static void hookTimeZone() {
@@ -144,8 +157,28 @@ public final class BSpoofOsIdentity {
         }
     }
 
-    private static void hookWlan0Mac() {
+    /**
+     * Audit fix 2026-10-04: paired-device MACs are stable host hardware and
+     * were unhooked (no Bluetooth service proxy). A fresh identity has no
+     * paired devices.
+     */
+    private static void hookBondedDevices() {
         try {
+            Pine.hook(BluetoothAdapter.class.getDeclaredMethod("getBondedDevices"),
+                    new MethodHook() {
+                @Override
+                public void beforeCall(Pine.CallFrame callFrame) {
+                    if (BSpoofManager.get().isSpoofActive()) {
+                        callFrame.setResult(java.util.Collections.emptySet());
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            Slog.e(TAG, "Pine hook on BluetoothAdapter.getBondedDevices() failed", t);
+        }
+    }
+
+    private static void hookWlan0Mac() {        try {
             Pine.hook(NetworkInterface.class.getDeclaredMethod("getHardwareAddress"),
                     new MethodHook() {
                         @Override

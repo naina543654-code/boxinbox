@@ -275,6 +275,22 @@ class BlackBoxRuntime : SandboxRuntime {
     }
 
     /**
+     * Audit fix 2026-10-04: detects a never-wiped virtual user (e.g. the
+     * identity record was corrupted/deleted out-of-band). Disk-based, no IPC —
+     * safe to call any time.
+     */
+    override fun hasLeftoverGuestState(): Boolean {
+        return runCatching {
+            val appRoot = BEnvironment.getAppRootDir()
+            val pkgs = appRoot.listFiles { f -> f.isDirectory }
+            if (!pkgs.isNullOrEmpty()) return true
+            val userDir = BEnvironment.getUserDir(VIRTUAL_USER_ID)
+            if (userDir.isDirectory && userDir.listFiles()?.isNotEmpty() == true) return true
+            false
+        }.getOrDefault(false)
+    }
+
+    /**
      * Fully remove the virtual user and everything in it.
      *
      * Bug history: this used to be `runCatching { deleteUser(..) }` — any
@@ -463,6 +479,12 @@ class BlackBoxRuntime : SandboxRuntime {
             File(BEnvironment.getVirtualRoot(), "data/user_de/$VIRTUAL_USER_ID"),
             BEnvironment.getExternalUserDir(VIRTUAL_USER_ID),
             BEnvironment.getHotfixDir(VIRTUAL_USER_ID),
+            // Audit fix 2026-10-04: virtual AccountManager accounts
+            // (blackbox/system/accounts.conf) survived delete/reset — a
+            // re-cloned GMS re-discovered the previous identity's Google
+            // account without sign-in. The largest hole against the
+            // fresh-env-per-identity rule.
+            BEnvironment.getAccountsConf(),
         )
         pkgs.forEach { dirs += BEnvironment.getAppDir(it) }
         val targets = dirs.distinct().filter { it.exists() }

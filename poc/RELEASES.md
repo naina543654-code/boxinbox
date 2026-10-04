@@ -137,3 +137,26 @@ see `poc/SPOOFING_MATRIX.md` for the verification matrix.
 - ProbeV2 gains a `telephony.line1Number` comparison row (needs READ_PHONE_STATE).
 - Untested on-device: needs Jason's install + probe run with phone permission granted.
 - Artifacts rebuilt from 61844fb and committed: engine AAR md5 7efee965ea8cca3f04e7470d97cb7484 (GetLine1Number proxy + Pine hooks verified in host dex); host APK versionName 1.0-poc-runtime-61844fb; probe 1.0-61844fb (stamps verified in resources.arsc; probe gains the telephony.line1Number row).
+
+## 2026-10-04 — audit-fix batch (CODE-AUDIT-2026-10-04.md)
+Full six-track code audit (51 matrix rows: 44 OK / 2 partial / 5 broken). Fixed:
+- CRITICAL: SubscriptionManager/SubscriptionInfo had no ISub proxy — real MSISDN+ICCID leaked around the getLine1Number fix. New BSubscriptionSpoof Pine hooks (empty list / per-identity number+ICCID, fail-closed).
+- CRITICAL: IPhoneSubInfo passthrough — hooked getDeviceId/getImeiForSubscriber/getDeviceIdForPhone/getSubscriberIdForSubscriber/getIccSerialNumberForSubscriber/getMsisdnForSubscriber/getVoiceMailNumberForSubscriber.
+- CRITICAL: Widevine deviceUniqueId unhooked — new BSpoofMediaDrm serves deterministic per-identity SHA-256("widevine-"+androidId).
+- CRITICAL: ro.serialno leaked — new per-identity device.serial (16 hex) served via Build.SERIAL patch, SystemProperties table, getprop table, build.prop, and profile-gated getSerialForPackage.
+- CRITICAL: getConfiguredNetworks leaked real saved SSIDs/BSSIDs — now empty when active.
+- BROKEN: dead @ProxyMethod names removed (getSubscriberId/getSimSerialNumber/getLine1Number — nonexistent on ITelephony API 33/34, verified vs AOSP); Pine public-API hooks are the live enforcement (added for getSubscriberId/getSimSerialNumber/getImei/getMeid/getDeviceId/getVoiceMailNumber).
+- BROKEN: SystemProviderStub query() honored a hardcoded {"name","value"} cursor — guests saw the literal key string; now honors the caller's projection. Dev-mode rows use the requested key name.
+- HIGH: accounts.conf now wiped on Reset/Delete (virtual accounts no longer survive).
+- HIGH: stale in-memory profile — host bumps profiles/generation on save/delete; engine re-stats throttled (2s) and invalidates.
+- IdentityManager.generateIdentity() now wipes leftover guest state if the identity record is missing/corrupt (was: silent build-over).
+- ProfileStore: atomic writes (temp+rename), per-identity wlan0_address file, generation bump on delete.
+- SpoofProfile.fromJson: strict for identity-critical fields (wifiMac/bluetoothMac/simSerial/phoneNumber/serial) — no more per-parse fabrication.
+- BSpoofManager: fail-closed activation (empty {} no longer counts as spoofed); apiLevel absent no longer fabricates "0"; gsm.version.baseband answered from profile radio.
+- BProcFsSpoof: /sys/class/net/wlan0/address redirected to per-identity file.
+- BluetoothAdapter.getBondedDevices() → empty set when active.
+- ClassInvocationStub: hook exceptions now fall back to the real method (was: crash into guest).
+- BSpoofOsIdentity: idempotency guard.
+- ProbeV2: 14 new rows (subscriberId, voiceMail, deviceId, build.serial, sysprop.ro.serialno, submgr.activeList, wifi.configuredNets, mediadrm.deviceUid, proc.version, sys.build.prop, sys.wlan0.address, bt.bondedDevices, settings.adb_enabled) + BLUETOOTH_CONNECT permission.
+- UI: full visual redesign (cards, pills, collapsible technical details, danger zone) — same features, decluttered.
+- Untested on-device: entire batch needs Jason's install + probe run.

@@ -77,14 +77,6 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         return Md5Utils.md5(BlackBoxCore.getHostPkg());
     }
 
-    private static String spoofedOrLegacySubscriberId() {
-        BSpoofManager spoof = BSpoofManager.get();
-        if (spoof.isSpoofActive() && spoof.getSubscriberId() != null) {
-            return spoof.getSubscriberId();
-        }
-        return Md5Utils.md5(BlackBoxCore.getHostPkg());
-    }
-
     @ProxyMethod("getDeviceId")
     public static class GetDeviceId extends MethodHook {
         @Override
@@ -132,52 +124,20 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         }
     }
 
-    @ProxyMethod("getSubscriberId")
-    public static class GetSubscriberId extends MethodHook {
-        @Override
-        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            return spoofedOrLegacySubscriberId();
-        }
-    }
+    // NOTE: the @ProxyMethod("getSubscriberId"), @ProxyMethod("getSimSerialNumber")
+    // and @ProxyMethod("getLine1Number") hooks were removed 2026-10-04: those
+    // bare names do not exist on ITelephony in API 33/34 (verified against the
+    // AOSP android14-release AIDL — the API 30 feature-id refactor renamed
+    // them, and SIM-serial always lived on IPhoneSubInfo). Dead names fall
+    // through to the real method silently, so keeping them was worse than
+    // useless. Live enforcement is now: BTelephonyApiSpoof Pine hooks on the
+    // TelephonyManager public APIs + IPhoneSubInfoProxy hooks below.
 
     @ProxyMethod("getDeviceIdWithFeature")
     public static class GetDeviceIdWithFeature extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             return spoofedOrLegacyDeviceId();
-        }
-    }
-
-    @ProxyMethod("getSimSerialNumber")
-    public static class GetSimSerialNumber extends MethodHook {
-        @Override
-        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            BSpoofManager spoof = BSpoofManager.get();
-            if (spoof.isSpoofActive() && spoof.getSimSerial() != null) {
-                Log.d(TAG, "getSimSerialNumber: spoofed");
-                return spoof.getSimSerial();
-            }
-            return method.invoke(who, args);
-        }
-    }
-
-    /**
-     * Track F: per-identity MSISDN. Without this hook the guest reads the
-     * host SIM's REAL phone number — identical across every identity, a
-     * stable cross-identity link for any backend that keys accounts by
-     * device-reported number. Active profile -> per-identity E.164 number;
-     * inactive -> genuine passthrough.
-     */
-    @ProxyMethod("getLine1Number")
-    public static class GetLine1Number extends MethodHook {
-        @Override
-        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            BSpoofManager spoof = BSpoofManager.get();
-            if (spoof.isSpoofActive() && spoof.getPhoneNumber() != null) {
-                Log.d(TAG, "getLine1Number: spoofed");
-                return spoof.getPhoneNumber();
-            }
-            return method.invoke(who, args);
         }
     }
 

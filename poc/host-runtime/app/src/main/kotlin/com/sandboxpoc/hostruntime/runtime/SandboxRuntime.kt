@@ -46,6 +46,14 @@ interface SandboxRuntime {
     /** Tear down the virtual runtime entirely. */
     fun destroy()
 
+    /**
+     * True when the virtual user still holds guest state (installed packages
+     * or data dirs) — e.g. after a corrupted identity record. Used by
+     * [com.sandboxpoc.hostruntime.identity.IdentityManager] to refuse building
+     * a new identity over a never-wiped user.
+     */
+    fun hasLeftoverGuestState(): Boolean
+
     /** Current runtime status. Honest — never faked. */
     fun getStatus(): RuntimeStatus
 }

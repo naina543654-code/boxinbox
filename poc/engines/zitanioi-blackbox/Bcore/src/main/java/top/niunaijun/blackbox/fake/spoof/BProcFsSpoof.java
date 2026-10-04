@@ -125,12 +125,20 @@ public final class BProcFsSpoof {
         File profiles = new File(filesDir, "profiles");
         File buildProp = new File(profiles, "build.prop");
         File procVersion = new File(profiles, "proc_version");
+        File wlan0Address = new File(profiles, "wlan0_address");
         try {
             if (buildProp.isFile()) {
                 IOCore.get().addRedirect("/system/build.prop", buildProp.getAbsolutePath());
             }
             if (procVersion.isFile()) {
                 IOCore.get().addRedirect("/proc/version", procVersion.getAbsolutePath());
+            }
+            // Audit fix 2026-10-04: /sys/class/net/wlan0/address exposed the
+            // real Wi-Fi MAC (only 4 static redirects existed). The host
+            // writes the per-identity MAC here at identity creation.
+            if (wlan0Address.isFile()) {
+                IOCore.get().addRedirect("/sys/class/net/wlan0/address",
+                        wlan0Address.getAbsolutePath());
             }
         } catch (Throwable t) {
             Slog.w(TAG, "static procfs redirects failed", t);

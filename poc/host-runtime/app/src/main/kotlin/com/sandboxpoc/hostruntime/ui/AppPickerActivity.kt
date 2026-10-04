@@ -4,10 +4,12 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Typeface
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import com.sandboxpoc.hostruntime.SandboxApp
 import java.io.File
@@ -39,7 +41,7 @@ class AppPickerActivity : Activity() {
 
         val root = Ui.screen(this)
         root.addView(Ui.title(this, "Clone Application"))
-        root.addView(Ui.row(this, "Only the app's APK file is used — never its data."))
+        root.addView(Ui.subtitle(this, "Only the app's APK file is used — never its data."))
         val search = Ui.searchField(this, "Search apps…")
         root.addView(search)
         resultsBox = LinearLayout(this).apply {
@@ -57,7 +59,7 @@ class AppPickerActivity : Activity() {
         setContentView(Ui.page(root))
     }
 
-    /** Name-only rows, filtered by the search query (matches name or package). */
+    /** App rows, filtered by the search query (matches name or package). */
     private fun renderResults(filter: String) {
         resultsBox.removeAllViews()
         val q = filter.trim().lowercase()
@@ -66,10 +68,19 @@ class AppPickerActivity : Activity() {
             it.label.lowercase().contains(q) || it.packageName.lowercase().contains(q)
         }
         if (entries.isEmpty()) {
-            resultsBox.addView(Ui.row(this, "No apps match."))
+            resultsBox.addView(Ui.subtitle(this, "No apps match."))
         }
         entries.forEach { e ->
-            resultsBox.addView(Ui.button(this, e.label) { confirmInstall(e) })
+            val card = Ui.card(this)
+            card.addView(TextView(this).apply {
+                text = e.label
+                textSize = 15f
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(Ui.TEXT)
+            })
+            card.addView(Ui.subtitle(this, e.packageName))
+            card.addView(Ui.secondaryButton(this, "Clone into sandbox") { confirmInstall(e) })
+            resultsBox.addView(card)
         }
     }
 

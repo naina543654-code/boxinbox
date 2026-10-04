@@ -29,6 +29,7 @@ object ProfileValidator {
     private val LOCAL_MAC_RE = Regex("^02(:[0-9A-F]{2}){5}$")
     private val SIM_SERIAL_RE = Regex("^89\\d{17,18}$")
     private val PHONE_NUMBER_RE = Regex("^\\+\\d{7,15}$")
+    private val SERIAL_RE = Regex("^[0-9A-F]{16}$")
     private val LOCALE_TAG_RE = Regex("^[a-z]{2,3}(-[A-Z][a-z]{3})?-[A-Z]{2}$")
     private val SECURITY_PATCH_RE = Regex("^\\d{4}-\\d{2}-\\d{2}$")
     private val KERNEL_RE = Regex("^\\d+\\.\\d+\\.\\d+(-android\\d+)?(-\\d+)*(-g[0-9a-f]+)?$")
@@ -222,6 +223,9 @@ object ProfileValidator {
         }
         if (!PHONE_NUMBER_RE.matches(sp.telephony.phoneNumber)) {
             violations += "telephony.phoneNumber '${sp.telephony.phoneNumber}' is not E.164 (+7..15 digits)"
+        }
+        if (!SERIAL_RE.matches(sp.device.serial)) {
+            violations += "device.serial '${sp.device.serial}' is not 16 uppercase hex chars"
         }
 
         // Locale: timezone and locale tag must be coherent with each other

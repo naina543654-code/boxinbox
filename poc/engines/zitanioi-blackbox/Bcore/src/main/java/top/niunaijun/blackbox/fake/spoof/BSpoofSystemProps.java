@@ -136,6 +136,11 @@ public final class BSpoofSystemProps {
         if (key.equals("ro.build.type")) {
             return "user";
         }
+        // Audit fix 2026-10-04: the real serial is stable across identities
+        // and readable with zero permission — never pass it through.
+        if (key.equals("ro.serialno")) {
+            return spoof.getSerial();
+        }
         return null;
     }
 

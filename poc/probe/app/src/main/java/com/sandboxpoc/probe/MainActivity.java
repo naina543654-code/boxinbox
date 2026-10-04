@@ -47,6 +47,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.net.NetworkInterface;
+import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -58,6 +59,7 @@ import java.util.HashSet;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -82,7 +84,9 @@ public class MainActivity extends Activity {
     private static final String[] WANTED_PERMS = new String[]{
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.READ_PHONE_STATE
+            Manifest.permission.READ_PHONE_STATE,
+            // API 31+: needed for BluetoothAdapter.getBondedDevices().
+            Manifest.permission.BLUETOOTH_CONNECT
     };
 
     /** Intent extra carrying the active virtual device profile as a JSON string. */
@@ -712,6 +716,7 @@ public class MainActivity extends Activity {
         cmpWebViewUa();
         cmpPackages();
         cmpTransport();
+        cmpAuditFixes();
         cmpMovement();
         raw("");
         raw("Tolerances: lat/lon |delta|<=1e-4 deg; accuracy |delta|<=max(10m,50% of expected);");
@@ -1388,6 +1393,217 @@ public class MainActivity extends Activity {
         }
         // Guest keeps real internet by design: informational only.
         cmpRow("network.transport", eT, obs.isEmpty() ? null : String.join(",", obs), Cmp.INFO);
+    }
+
+    /**
+     * Rows for the 2026-10-04 audit fixes: the surfaces the audit found
+     * leaking real cross-identity values (SubscriptionManager, IPhoneSubInfo
+     * paths, Widevine ID, ro.serialno, saved Wi-Fi networks, voicemail
+     * number, bonded Bluetooth devices, the Settings cursor bug).
+     */
+    private void cmpAuditFixes() {
+        JSONObject dev = expectedProfile == null ? null : expectedProfile.optJSONObject("device");
+        JSONObject tel = expectedProfile == null ? null : expectedProfile.optJSONObject("telephony");
+        boolean phonePerm = checkSelfPermission(Manifest.permission.READ_PHONE_STATE)
+                == PackageManager.PERMISSION_GRANTED;
+
+        if (phonePerm) {
+            TelephonyManager tm = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+            if (tm != null) {
+                cmpString("telephony.subscriberId", opt(tel, "subscriberId"),
+                        quietGet(() -> emptyToNull(tm.getSubscriberId())));
+                cmpString("telephony.voiceMail", opt(tel, "phoneNumber"),
+                        quietGet(() -> emptyToNull(tm.getVoiceMailNumber())));
+                // getImei() needs privileged permission on API 29+; best effort.
+                cmpString("telephony.deviceId", opt(tel, "deviceId"),
+                        quietGet(() -> emptyToNull(tm.getImei())));
+            }
+            try {
+                cmpString("build.serial", opt(dev, "serial"), emptyToNull(Build.getSerial()));
+            } catch (SecurityException se) {
+                cmpRow("build.serial", opt(dev, "serial"), "PERMISSION_DENIED", Cmp.UNKNOWN);
+            } catch (Exception e) {
+                cmpRow("build.serial", opt(dev, "serial"),
+                        "UNAVAILABLE(" + e.getClass().getSimpleName() + ")", Cmp.UNKNOWN);
+            }
+            // No ISub binder proxy exists: the Pine hooks must hide the real list.
+            try {
+                android.telephony.SubscriptionManager sm = (android.telephony.SubscriptionManager)
+                        getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE);
+                int n = sm == null ? -1 : sm.getActiveSubscriptionInfoList().size();
+                cmpRow("submgr.activeList", "0", n < 0 ? null : String.valueOf(n),
+                        n == 0 ? Cmp.PASS : (n < 0 ? Cmp.UNKNOWN : Cmp.FAIL));
+            } catch (Exception e) {
+                cmpRow("submgr.activeList", "0",
+                        "UNAVAILABLE(" + e.getClass().getSimpleName() + ")", Cmp.UNKNOWN);
+            }
+        } else {
+            cmpRow("telephony.subscriberId", opt(tel, "subscriberId"),
+                    "PERMISSION_DENIED", Cmp.UNKNOWN);
+            cmpRow("submgr.activeList", "0", "PERMISSION_DENIED", Cmp.UNKNOWN);
+            cmpRow("build.serial", opt(dev, "serial"), "PERMISSION_DENIED", Cmp.UNKNOWN);
+        }
+
+        // Saved networks: a fresh identity has none.
+        try {
+            WifiManager wm = (WifiManager) getSystemService(Context.WIFI_SERVICE);
+            int n = wm == null ? -1 : wm.getConfiguredNetworks().size();
+            cmpRow("wifi.configuredNets", "0", n < 0 ? null : String.valueOf(n),
+                    n == 0 ? Cmp.PASS : (n < 0 ? Cmp.UNKNOWN : Cmp.FAIL));
+        } catch (Exception e) {
+            cmpRow("wifi.configuredNets", "0",
+                    "UNAVAILABLE(" + e.getClass().getSimpleName() + ")", Cmp.UNKNOWN);
+        }
+
+        // ro.serialno via hidden SystemProperties (reflection).
+        cmpString("sysprop.ro.serialno", opt(dev, "serial"), sysProp("ro.serialno"));
+
+        cmpWidevine();
+        cmpProcFiles(dev);
+
+        // Bonded Bluetooth devices: a fresh identity has none.
+        try {
+            BluetoothAdapter ba = BluetoothAdapter.getDefaultAdapter();
+            int n = ba == null ? -1 : ba.getBondedDevices().size();
+            cmpRow("bt.bondedDevices", "0", n < 0 ? null : String.valueOf(n),
+                    n == 0 ? Cmp.PASS : (n < 0 ? Cmp.UNKNOWN : Cmp.FAIL));
+        } catch (SecurityException se) {
+            cmpRow("bt.bondedDevices", "0", "PERMISSION_DENIED", Cmp.UNKNOWN);
+        } catch (Exception e) {
+            cmpRow("bt.bondedDevices", "0",
+                    "UNAVAILABLE(" + e.getClass().getSimpleName() + ")", Cmp.UNKNOWN);
+        }
+
+        // adb_enabled: exercises the Settings cursor fix (was returning the
+        // literal key string through the query() path).
+        try {
+            int adb = Settings.Global.getInt(getContentResolver(), Settings.Global.ADB_ENABLED);
+            cmpRow("settings.adb_enabled", "0", String.valueOf(adb),
+                    adb == 0 ? Cmp.PASS : Cmp.FAIL);
+        } catch (Settings.SettingNotFoundException e) {
+            cmpRow("settings.adb_enabled", "0", "NOT_FOUND", Cmp.FAIL);
+        } catch (Exception e) {
+            cmpRow("settings.adb_enabled", "0",
+                    "UNAVAILABLE(" + e.getClass().getSimpleName() + ")", Cmp.UNKNOWN);
+        }
+    }
+
+    /** Best-effort string getter: exceptions become null (row → UNKNOWN). */
+    private interface QuietGetter {
+        String get() throws Exception;
+    }
+
+    private static String quietGet(QuietGetter g) {
+        try {
+            return g.get();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Reads a system property via the hidden SystemProperties API. */
+    private static String sysProp(String key) {
+        try {
+            Class<?> sp = Class.forName("android.os.SystemProperties");
+            java.lang.reflect.Method m = sp.getDeclaredMethod("get", String.class);
+            Object v = m.invoke(null, key);
+            String s = v == null ? null : v.toString();
+            return (s == null || s.isEmpty()) ? null : s;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Widevine deviceUniqueId must be the per-identity deterministic value. */
+    private void cmpWidevine() {
+        String androidId = opt(expectedProfile, "androidId");
+        String expectedHex = null;
+        if (androidId != null) {
+            try {
+                MessageDigest sha = MessageDigest.getInstance("SHA-256");
+                byte[] d = sha.digest(("widevine-" + androidId).getBytes("UTF-8"));
+                StringBuilder sb = new StringBuilder();
+                for (byte b : d) sb.append(String.format("%02x", b));
+                expectedHex = sb.toString();
+            } catch (Exception ignored) {
+            }
+        }
+        String observedHex = null;
+        String note = null;
+        try {
+            android.media.MediaDrm drm = new android.media.MediaDrm(WIDEVINE_UUID);
+            try {
+                byte[] id = drm.getPropertyByteArray("deviceUniqueId");
+                if (id != null) {
+                    StringBuilder sb = new StringBuilder();
+                    for (byte b : id) sb.append(String.format("%02x", b));
+                    observedHex = sb.toString();
+                }
+            } finally {
+                drm.release();
+            }
+        } catch (Exception e) {
+            note = "UNAVAILABLE(" + e.getClass().getSimpleName() + ")";
+        }
+        if (note != null) {
+            cmpRow("mediadrm.deviceUid", expectedHex == null ? null : expectedHex.substring(0, 16) + "…",
+                    note, Cmp.UNKNOWN);
+        } else {
+            cmpString("mediadrm.deviceUid", expectedHex, observedHex);
+        }
+    }
+
+    private static final UUID WIDEVINE_UUID =
+            new UUID(0x1077EFECC0B24D02L, 0xACE33C1E753E2ED0L);
+
+    /** /proc/version and /system/build.prop must serve the per-identity files. */
+    private void cmpProcFiles(JSONObject dev) {
+        String kernel = opt(dev, "kernelVersion");
+        String procVersion = readTextFile(new java.io.File("/proc/version"));
+        if (kernel != null && procVersion != null) {
+            boolean ok = procVersion.contains(kernel);
+            cmpRow("proc.version", "has kernel", ok ? "has kernel" : trunc(procVersion, 24),
+                    ok ? Cmp.PASS : Cmp.FAIL);
+        } else {
+            cmpRow("proc.version", kernel, procVersion == null ? null : trunc(procVersion, 24),
+                    Cmp.UNKNOWN);
+        }
+        String model = opt(dev, "model");
+        String buildProp = readTextFile(new java.io.File("/system/build.prop"));
+        if (model != null && buildProp != null) {
+            boolean ok = buildProp.contains("ro.product.model=" + model);
+            cmpRow("sys.build.prop", "model=" + trunc(model, 16),
+                    ok ? "model match" : "model MISMATCH", ok ? Cmp.PASS : Cmp.FAIL);
+        } else {
+            cmpRow("sys.build.prop", model,
+                    buildProp == null ? null : trunc(buildProp, 24), Cmp.UNKNOWN);
+        }
+        String wifiMac = expectedProfile == null ? null
+                : opt(expectedProfile.optJSONObject("network"), "wifiMac");
+        String addr = readTextFile(new java.io.File("/sys/class/net/wlan0/address"));
+        if (wifiMac != null && addr != null) {
+            cmpString("sys.wlan0.address", wifiMac, addr.trim(), true);
+        } else {
+            cmpRow("sys.wlan0.address", wifiMac, addr == null ? null : addr.trim(), Cmp.UNKNOWN);
+        }
+    }
+
+    private static String readTextFile(java.io.File f) {
+        try {
+            byte[] buf = new byte[(int) Math.min(f.length(), 65536)];
+            java.io.FileInputStream in = new java.io.FileInputStream(f);
+            try {
+                int off = 0, r;
+                while (off < buf.length && (r = in.read(buf, off, buf.length - off)) != -1) {
+                    off += r;
+                }
+                return new String(buf, 0, off, "UTF-8");
+            } finally {
+                in.close();
+            }
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private void cmpMovement() {

@@ -65,6 +65,24 @@ public class IWifiManagerProxy extends BinderInvocationStub {
         }
     }
 
+    @ProxyMethod("getConfiguredNetworks")
+    public static class GetConfiguredNetworks extends MethodHook {
+        /**
+         * Audit fix 2026-10-04: only scan results and connection info were
+         * hooked — the real SAVED networks (SSIDs/BSSIDs, strong geolocation,
+         * stable across identities) leaked via getConfiguredNetworks().
+         * A fresh identity has no saved networks: empty list when active.
+         */
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            if (BSpoofManager.get().isSpoofActive()) {
+                Log.d(TAG, "getConfiguredNetworks: spoofed -> empty");
+                return new ArrayList<>();
+            }
+            return method.invoke(who, args);
+        }
+    }
+
     @ProxyMethod("getConnectionInfo")
     public static class GetConnectionInfo extends MethodHook {
         /*

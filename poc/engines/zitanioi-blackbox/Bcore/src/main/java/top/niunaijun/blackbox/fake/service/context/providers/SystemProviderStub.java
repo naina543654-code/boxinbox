@@ -107,11 +107,10 @@ public class SystemProviderStub extends ClassInvocationStub implements BContentP
             result.putString("value", androidId);
             return result;
         }
-        // query(): Settings.Secure reads go through NameValueCache with a
-        // name/value cursor; hand back a one-row cursor for android_id.
-        MatrixCursor cursor = new MatrixCursor(new String[]{"name", "value"}, 1);
-        cursor.addRow(new Object[]{Settings.Secure.ANDROID_ID, androidId});
-        return cursor;
+        // query(): honor the caller's projection. Settings.Secure reads with
+        // projection {"value"} and takes column 0 — the old {"name","value"}
+        // cursor handed it the literal key string "android_id".
+        return valueCursor(args, Settings.Secure.ANDROID_ID, androidId);
     }
 
     private boolean isAndroidIdRequest(Object[] args) {
@@ -148,7 +147,8 @@ public class SystemProviderStub extends ClassInvocationStub implements BContentP
         if (!spoof.isSpoofActive()) {
             return null;
         }
-        if (!isDevSettingRequest(args)) {
+        String key = requestedDevKey(args);
+        if (key == null) {
             return null;
         }
         if ("call".equals(methodName)) {
@@ -156,29 +156,59 @@ public class SystemProviderStub extends ClassInvocationStub implements BContentP
             result.putString("value", "0");
             return result;
         }
-        MatrixCursor cursor = new MatrixCursor(new String[]{"name", "value"}, 1);
-        cursor.addRow(new Object[]{"adb_enabled", "0"});
+        // Same projection bug as the android_id path: answer {"value"}.
+        return valueCursor(args, key, "0");
+    }
+
+    /**
+     * Builds a one-row cursor honoring the caller's query() projection.
+     * {@code Settings} reads with projection {@code {"value"}} and takes
+     * column 0 — a hardcoded {@code {"name","value"}} cursor leaks the key
+     * string into the value slot.
+     */
+    private static android.database.Cursor valueCursor(Object[] args, String key, String value) {
+        String[] projection = null;
+        // ContentProvider.query(Uri, String[] projection, ...): args[1].
+        if (args != null && args.length > 1 && args[1] instanceof String[]) {
+            projection = (String[]) args[1];
+        }
+        if (projection == null || projection.length == 0) {
+            projection = new String[]{"name", "value"};
+        }
+        MatrixCursor cursor = new MatrixCursor(projection, 1);
+        Object[] row = new Object[projection.length];
+        for (int i = 0; i < projection.length; i++) {
+            if ("value".equals(projection[i])) {
+                row[i] = value;
+            } else if ("name".equals(projection[i])) {
+                row[i] = key;
+            } else {
+                row[i] = null;
+            }
+        }
+        cursor.addRow(row);
         return cursor;
     }
 
-    private boolean isDevSettingRequest(Object[] args) {
+    /** Returns which dev-mode key was requested, or null. */
+    private static String requestedDevKey(Object[] args) {
         if (args == null) {
-            return false;
+            return null;
         }
         for (Object arg : args) {
             if (arg instanceof String) {
                 String s = (String) arg;
                 if ("adb_enabled".equals(s) || "development_settings_enabled".equals(s)) {
-                    return true;
+                    return s;
                 }
             } else if (arg instanceof String[]) {
                 for (String s : (String[]) arg) {
                     if ("adb_enabled".equals(s) || "development_settings_enabled".equals(s)) {
-                        return true;
+                        return s;
                     }
                 }
             }
         }
-        return false;
+        return null;
     }
 }

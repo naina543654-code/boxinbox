@@ -47,7 +47,13 @@ import top.niunaijun.blackbox.utils.Slog;
  *  "sensors":[{"type":1,"name":"...","vendor":"..."}],
  *  "network":{"ssid":"\"SandboxNet\"","bssid":"02:15:3E:4A:5B:6C","transport":"WIFI"},
  *  "telephony":{"operatorName":"T-Mobile","operatorNumeric":"310260","countryIso":"us",
- *    "deviceId":"...","subscriberId":"..."}}
+ *    "networkType":13,"simSerial":"8944012345678901234",
+ *    "phoneNumber":"+12025550134"},
+ *  "locale":{"timezoneId":"America/New_York","localeTag":"en-US"},
+ *  "serial":"A1B2C3D4E5F60718" (device.serial — also serves Build.SERIAL,
+ *  ro.serialno, getSerialForPackage),
+ *  "wifiMac"/"bluetoothMac" (network.wifiMac/bluetoothMac),
+ *  "webViewUa" (device.webViewUa), "kernelVersion" (device.kernelVersion)}
  * </pre>
  *
  * <p>Intentionally NOT spoofed: {@code Build.VERSION.RELEASE} and
@@ -55,9 +61,10 @@ import top.niunaijun.blackbox.utils.Slog;
  * spoofing them destabilizes the guest — treated as Host Provided).
  * {@code Build.VERSION.SECURITY_PATCH} is spoofed only when the profile
  * carries a researched date (rows with "unknown" pass the host value
- * through). {@code Build.getSerial()} reads the {@code ro.serialno} system
- * property natively and is NOT covered by static-field reflection —
- * Partially Supported.
+ * through). {@code Build.getSerial()} is served from the per-identity
+ * {@code device.serial} profile value (also {@code ro.serialno} and
+ * {@code getSerialForPackage()}); {@code Build.getRadioVersion()} reads
+ * {@code gsm.version.baseband}, answered from the profile's radio value.
  */
 public class BSpoofManager {
     private static final String TAG = "BSpoofManager";
@@ -87,6 +94,8 @@ public class BSpoofManager {
             // value ("" for unknown hardware -> skipped in parse()).
             {"SOC_MANUFACTURER", "socManufacturer"},
             {"SOC_MODEL", "socModel"},
+            // Per-identity serial: Build.SERIAL, ro.serialno, getSerialForPackage.
+            {"SERIAL", "serial"},
     };
 
     /** android.os.Build long static field name -> profile device key. */
@@ -155,9 +164,30 @@ public class BSpoofManager {
     private String mSimSerial;
     /** Per-identity MSISDN (E.164) for getLine1Number — never the real SIM number. */
     private String mPhoneNumber;
+    /**
+     * Per-identity serial (Build.SERIAL / ro.serialno / getSerialForPackage).
+     * The real serial is stable across identities and readable with zero
+     * permission, so it is never passed through when a profile is active.
+     */
+    private String mSerial;
     private String mTimezoneId;
     private String mLocaleTag;
     private String mWebViewUa;
+
+    /** Relative to the host app filesDir; bumped by the host on every save/delete. */
+    private static final String GENERATION_REL_PATH = "profiles/generation";
+    /** Minimum interval between staleness stats (one cheap stat per hook call max). */
+    private static final long GENERATION_CHECK_INTERVAL_MS = 2000L;
+
+    /**
+     * Profile generation last loaded. A guest process that survives
+     * Reset/Delete would otherwise keep this singleton's cached profile
+     * forever — including the DELETED identity's spoofs. The host bumps the
+     * generation file on every save/delete; a change here invalidates the
+     * cache so the process reloads (or goes inactive when the profile is gone).
+     */
+    private long mProfileGeneration = -1L;
+    private long mLastGenerationCheckMs = 0L;
 
     public static BSpoofManager get() {
         return sInstance;
@@ -360,7 +390,8 @@ public class BSpoofManager {
             }
             case "ro.build.version.sdk": {
                 String v = mBuildFields.get("VERSION_SDK");
-                return v != null ? v : String.valueOf(mApiLevel);
+                // Never fabricate "0": absent apiLevel passes through.
+                return v != null ? v : (mApiLevel > 0 ? String.valueOf(mApiLevel) : null);
             }
             case "ro.build.date.utc": {
                 Long t = mBuildLongFields.get("TIME");
@@ -373,6 +404,12 @@ public class BSpoofManager {
             case "ro.build.fingerprint": return mBuildFields.get("FINGERPRINT");
             case "ro.soc.manufacturer": return mBuildFields.get("SOC_MANUFACTURER");
             case "ro.soc.model": return mBuildFields.get("SOC_MODEL");
+            // Real serial is stable across identities and zero-permission;
+            // never pass it through when a profile is active.
+            case "ro.serialno": return mSerial;
+            // Build.getRadioVersion() reads this property directly, bypassing
+            // the patched Build.RADIO static field.
+            case "gsm.version.baseband": return mBuildFields.get("RADIO");
             case "ro.debuggable": return "0";
             case "ro.secure": return "1";
             default: return null;
@@ -408,6 +445,17 @@ public class BSpoofManager {
     public String getSimSerial() {
         ensureLoaded();
         return mSpoofActive ? mSimSerial : null;
+    }
+
+    /**
+     * Per-identity serial for {@code Build.SERIAL}, {@code ro.serialno} and
+     * {@code getSerialForPackage()}. The real serial is stable across
+     * identities and readable with zero permission — null when inactive so
+     * callers fail closed instead of passing the real value through.
+     */
+    public String getSerial() {
+        ensureLoaded();
+        return mSpoofActive ? mSerial : null;
     }
 
     /**
@@ -512,7 +560,23 @@ public class BSpoofManager {
     }
 
     private synchronized void ensureLoaded() {
-        if (mLoaded || mLoading) {
+        if (mLoading) {
+            return;
+        }
+        // Staleness check (throttled): the host bumps profiles/generation on
+        // every save/delete. A guest process that survives Reset/Delete must
+        // not keep serving the deleted identity's cached profile — a changed
+        // generation drops the cache so this process reloads (or goes
+        // inactive when the profile file is gone).
+        long now = System.currentTimeMillis();
+        if (mLoaded && now - mLastGenerationCheckMs >= GENERATION_CHECK_INTERVAL_MS) {
+            mLastGenerationCheckMs = now;
+            if (readGeneration() != mProfileGeneration) {
+                Slog.d(TAG, "ensureLoaded: profile generation changed — invalidating cache");
+                resetState();
+            }
+        }
+        if (mLoaded) {
             return;
         }
         // NOTE: mLoaded is only set after a successful parse. A missing
@@ -545,7 +609,13 @@ public class BSpoofManager {
             JSONObject root = new JSONObject(readFully(profileFile));
             parse(root);
             mLoaded = true;
-            mSpoofActive = true;
+            // Fail closed: an empty-but-valid {} must not count as "spoofed".
+            // A genuine profile always carries an androidId and build fields;
+            // without them the hooks pass through instead of serving zeros.
+            mSpoofActive = mAndroidId != null && !mAndroidId.isEmpty()
+                    && !mBuildFields.isEmpty();
+            mProfileGeneration = readGeneration();
+            mLastGenerationCheckMs = System.currentTimeMillis();
             Slog.d(TAG, "ensureLoaded: spoof profile active: "
                     + root.optString("profileId", "<unknown>"));
             // Procfs/build.prop tells bypass every Java hook; hide them via
@@ -560,6 +630,76 @@ public class BSpoofManager {
             mSpoofActive = false;
         } finally {
             mLoading = false;
+        }
+    }
+
+    /**
+     * Drops all cached profile state; the next hook call reloads from disk.
+     * Used when the host bumps the profile generation (save/delete) while
+     * this process is still alive.
+     */
+    private void resetState() {
+        mLoaded = false;
+        mSpoofActive = false;
+        mProfileGeneration = -1L;
+        mBuildFields.clear();
+        mBuildLongFields.clear();
+        mVersionFields.clear();
+        mAndroidId = null;
+        mKernelVersion = null;
+        mVersionRelease = null;
+        mApiLevel = -1;
+        mLatitude = 0d;
+        mLongitude = 0d;
+        mLocationAccuracy = 0f;
+        mAltitude = 0d;
+        mMovementEnabled = false;
+        mMovementSpeedMps = 0f;
+        mMovementBearingDeg = 0f;
+        mSensorTypes = new int[0];
+        mSensorNames.clear();
+        mSensorVendors.clear();
+        mSsid = null;
+        mBssid = null;
+        mWifiMac = null;
+        mBluetoothMac = null;
+        mOperatorName = null;
+        mOperatorNumeric = null;
+        mCountryIso = null;
+        mTelephonyDeviceId = null;
+        mSubscriberId = null;
+        mNetworkType = 13;
+        mSimSerial = null;
+        mPhoneNumber = null;
+        mSerial = null;
+        mTimezoneId = null;
+        mLocaleTag = null;
+        mWebViewUa = null;
+    }
+
+    /**
+     * Reads the host-bumped profile generation. Uses the same
+     * applicationInfo.dataDir field read as ensureLoaded (no hooked-method
+     * dispatch); returns -1 when the file is absent.
+     */
+    private long readGeneration() {
+        try {
+            Context hostContext = BlackBoxCore.getContext();
+            if (hostContext == null) {
+                return -1L;
+            }
+            String dataDir = hostContext.getApplicationInfo().dataDir;
+            if (dataDir == null) {
+                return -1L;
+            }
+            File genFile = new File(dataDir + "/files", GENERATION_REL_PATH);
+            if (!genFile.isFile()) {
+                return -1L;
+            }
+            String raw = readFully(genFile).trim();
+            return Long.parseLong(raw);
+        } catch (Throwable t) {
+            return -1L;
         }
     }
 
@@ -599,7 +739,12 @@ public class BSpoofManager {
                 mWebViewUa = ua;
             }
             mVersionRelease = device.optString("androidVersion", null);
-            mApiLevel = device.optInt("apiLevel", 0);
+            // Absent apiLevel must not fabricate "0" — callers pass through.
+            mApiLevel = device.has("apiLevel") ? device.optInt("apiLevel", -1) : -1;
+            String serial = device.optString("serial", null);
+            if (serial != null && !serial.isEmpty()) {
+                mSerial = serial;
+            }
         }
 
         mAndroidId = root.optString("androidId", null);

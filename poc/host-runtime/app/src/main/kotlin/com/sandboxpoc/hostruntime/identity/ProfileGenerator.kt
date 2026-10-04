@@ -14,6 +14,7 @@ import com.sandboxpoc.hostruntime.profile.timezoneFor
 import com.sandboxpoc.hostruntime.profile.localeFor
 import com.sandboxpoc.hostruntime.profile.newLocalMac
 import com.sandboxpoc.hostruntime.profile.newPhoneNumber
+import com.sandboxpoc.hostruntime.profile.newSerial
 import com.sandboxpoc.hostruntime.profile.newSimSerial
 import java.security.SecureRandom
 import java.util.UUID
@@ -312,6 +313,7 @@ object ProfileGenerator {
             socManufacturer = socFor(row.hardware, row.model).first,
             socModel = socFor(row.hardware, row.model).second,
             webViewUa = buildWebViewUa(row.androidVersion, row.model, row.buildId),
+            serial = newSerial(),
         )
         return SpoofProfile(
             profileId = profileId,
