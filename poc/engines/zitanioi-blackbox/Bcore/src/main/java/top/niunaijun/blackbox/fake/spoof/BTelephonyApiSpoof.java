@@ -26,9 +26,11 @@ import top.niunaijun.blackbox.utils.Slog;
  * apps call, regardless of which internal path the framework uses
  * (system-property read, unhooked binder method, or cached value).
  *
- * <p>Fail-open: install failures never throw; every hook additionally gates on
- * {@code BSpoofManager.isSpoofActive()} and on the profile actually carrying a
- * value, so an inactive profile or a missing field passes through untouched.
+ * <p>Fail-closed (R3 2026-10-05): install failures never throw, but every
+ * hook gates on {@code BSpoofManager.isSpoofActive()} and, when a profile is
+ * active, overrides the result even if the profile field is missing
+ * ({@code setResult(...)} with a possibly-null value) — an inactive profile
+ * passes through untouched, an active one never falls through to real values.
  */
 public final class BTelephonyApiSpoof {
     private static final String TAG = "BTelephonyApiSpoof";
@@ -233,9 +235,12 @@ public final class BTelephonyApiSpoof {
     }
 
     /**
-     * Hooks a no/slot-arg {@code TelephonyManager} country-ISO getter to the
-     * per-identity country (e.g. "nl"). Same fail-open shape as
-     * {@link #hookOperatorGetter}: inactive profile passes through.
+     * Hooks a no-arg or {@code (int subId)} {@code TelephonyManager} country-ISO
+     * getter to the per-identity country (e.g. "nl"). Same fail-closed shape
+     * as {@link #hookOperatorGetter}: inactive profile passes through, active
+     * profile overrides even when the field is missing. (R4 2026-10-05: the
+     * int parameter is a subscription ID, not a slot index — the hooks never
+     * read it.)
      */
     private static void hookCountryIsoGetter(String name, Class<?>[] params) {
         final Method target;
@@ -268,8 +273,10 @@ public final class BTelephonyApiSpoof {
     }
 
     /**
-     * Hooks a no/slot-arg {@code TelephonyManager} string getter to the
-     * per-identity profile value. Fail-closed for number-like values (null
+     * Hooks a no-arg or {@code (int subId)} {@code TelephonyManager} string
+     * getter to the per-identity profile value. (R4 2026-10-05: the int
+     * parameter is a subscription ID, not a slot index — the hooks never
+     * read it.) Fail-closed for number-like values (null
      * when inactive — a null MSISDN/IMSI/ICCID is plausible); device IDs keep
      * the engine's legacy stable fake when no profile is active (the real
      * IMEI must never leak, and a null there is less plausible).

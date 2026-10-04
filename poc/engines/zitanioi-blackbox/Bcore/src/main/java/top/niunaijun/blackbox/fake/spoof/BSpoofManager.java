@@ -39,7 +39,10 @@ import top.niunaijun.blackbox.utils.Slog;
  *    "buildId":"UQ1A.240205.002","buildTags":"release-keys","buildType":"user",
  *    "androidVersion":"14","apiLevel":34,"securityPatch":"2024-01-05",
  *    "displayId":"UQ1A.240205.002","buildIncremental":"12038998",
- *    "kernelVersion":"6.1.25-android14-4-00001-g3f2e1d0c9b8a"},
+ *    "kernelVersion":"6.1.25-android14-4-00001-g3f2e1d0c9b8a",
+ *    "buildTime":1704067200000,"buildUser":"android-build",
+ *    "buildHost":"abfarm","radio":"unknown",
+ *    "serial":"A1B2C3D4E5F60718","webViewUa":"Mozilla/5.0 ..."},
  *  "androidId":"a1b2c3d4e5f60718",
  *  "location":{"latitude":37.42,"longitude":-122.08,"accuracy":12.0,"altitude":10.0,
  *    "speed":0.0,"bearing":0.0,
@@ -50,10 +53,7 @@ import top.niunaijun.blackbox.utils.Slog;
  *    "networkType":13,"simSerial":"8944012345678901234",
  *    "phoneNumber":"+12025550134"},
  *  "locale":{"timezoneId":"America/New_York","localeTag":"en-US"},
- *  "serial":"A1B2C3D4E5F60718" (device.serial — also serves Build.SERIAL,
- *  ro.serialno, getSerialForPackage),
- *  "wifiMac"/"bluetoothMac" (network.wifiMac/bluetoothMac),
- *  "webViewUa" (device.webViewUa), "kernelVersion" (device.kernelVersion)}
+ *  "wifiMac"/"bluetoothMac" (network.wifiMac/bluetoothMac)}
  * </pre>
  *
  * <p>Intentionally NOT spoofed: {@code Build.VERSION.RELEASE} and
@@ -385,13 +385,16 @@ public class BSpoofManager {
             case "ro.build.version.incremental": return mVersionFields.get("INCREMENTAL");
             case "ro.build.version.security_patch": return mVersionFields.get("SECURITY_PATCH");
             case "ro.build.version.release": {
-                String v = mBuildFields.get("VERSION_RELEASE");
-                return v != null ? v : mVersionRelease;
+                // R4 audit 2026-10-05 (R4-19): mBuildFields never carries
+                // VERSION_RELEASE — the lookup was dead. Use the parsed
+                // version-release directly.
+                return mVersionRelease;
             }
             case "ro.build.version.sdk": {
-                String v = mBuildFields.get("VERSION_SDK");
+                // R4 audit 2026-10-05 (R4-19): mBuildFields never carries
+                // VERSION_SDK — the lookup was dead.
                 // Never fabricate "0": absent apiLevel passes through.
-                return v != null ? v : (mApiLevel > 0 ? String.valueOf(mApiLevel) : null);
+                return mApiLevel > 0 ? String.valueOf(mApiLevel) : null;
             }
             case "ro.build.date.utc": {
                 Long t = mBuildLongFields.get("TIME");

@@ -54,4 +54,38 @@ public class INetworkManagementServiceProxy extends BinderInvocationStub {
             return method.invoke(who, args);
         }
     }
+
+    /**
+     * R4 audit 2026-10-05 (R4-11): {@code getInterfaceConfig("wlan0")} carries
+     * no permission enforcement — a guest reaching the
+     * {@code network_management} binder via hidden-API ServiceManager
+     * reflection could read the real Wi-Fi MAC, bypassing the
+     * {@code NetworkInterface.getHardwareAddress()} Pine hook. Rewrite the
+     * hardware address to the per-identity MAC for wlan0 when active.
+     * (InterfaceConfiguration is @hide — field set reflectively.)
+     */
+    @ProxyMethod("getInterfaceConfig")
+    public static class GetInterfaceConfig extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            Object config = method.invoke(who, args);
+            try {
+                top.niunaijun.blackbox.fake.spoof.BSpoofManager spoof =
+                        top.niunaijun.blackbox.fake.spoof.BSpoofManager.get();
+                if (config != null && spoof.isSpoofActive()
+                        && args != null && args.length > 0
+                        && "wlan0".equals(args[0])) {
+                    String mac = spoof.getWifiMac();
+                    if (mac != null) {
+                        java.lang.reflect.Field f =
+                                config.getClass().getField("hardwareAddress");
+                        f.set(config, mac);
+                    }
+                }
+            } catch (Throwable ignored) {
+                // Never break the call on a rewrite failure.
+            }
+            return config;
+        }
+    }
 }

@@ -109,7 +109,10 @@ public class IWifiManagerProxy extends BinderInvocationStub {
                 if (slice != null) {
                     return slice;
                 }
-                return method.invoke(who, args);
+                // R4 audit 2026-10-05 (R4-10): if the slice can't be built,
+                // fail closed to null (callers tolerate it) — never hand the
+                // guest the real saved networks while spoofing is active.
+                return null;
             }
             return method.invoke(who, args);
         }
@@ -134,6 +137,75 @@ public class IWifiManagerProxy extends BinderInvocationStub {
         }
     }
 
+    /**
+     * R4 audit 2026-10-05 (R4-6): the regulatory country must agree with the
+     * spoofed per-identity locale/country — the real one is a weak
+     * inconsistency tell.
+     */
+    @ProxyMethod("getCountryCode")
+    public static class GetCountryCode extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            BSpoofManager spoof = BSpoofManager.get();
+            if (spoof.isSpoofActive()) {
+                String iso = spoof.getCountryIso();
+                if (iso != null) {
+                    return iso.toUpperCase(java.util.Locale.US);
+                }
+                return null;
+            }
+            return method.invoke(who, args);
+        }
+    }
+
+    /**
+     * R4 audit 2026-10-05 (R4-7): DhcpInfo (IP, gateway, netmask, DNS) is a
+     * fingerprint of the host's real LAN — null when active.
+     */
+    @ProxyMethod("getDhcpInfo")
+    public static class GetDhcpInfo extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            if (BSpoofManager.get().isSpoofActive()) {
+                return null;
+            }
+            return method.invoke(who, args);
+        }
+    }
+
+    /**
+     * R4 audit 2026-10-05 (R4-8): factory MACs are persistent device
+     * identifiers. Server-side NETWORK_SETTINGS-gated (guest-unreachable in
+     * practice) — defense in depth: empty when active.
+     */
+    @ProxyMethod("getFactoryMacAddresses")
+    public static class GetFactoryMacAddresses extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            if (BSpoofManager.get().isSpoofActive()) {
+                return new String[0];
+            }
+            return method.invoke(who, args);
+        }
+    }
+
+    /**
+     * R4 audit 2026-10-05 (R4-9): the privileged connected-network config
+     * carries the real SSID/BSSID (BSSID link is the concern, given
+     * getConnectionInfo is spoofed). NETWORK_SETTINGS-gated in practice —
+     * defense in depth: null when active.
+     */
+    @ProxyMethod("getPrivilegedConnectedNetwork")
+    public static class GetPrivilegedConnectedNetwork extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            if (BSpoofManager.get().isSpoofActive()) {
+                return null;
+            }
+            return method.invoke(who, args);
+        }
+    }
+
     @ProxyMethod("getPrivilegedConfiguredNetworks")
     public static class GetPrivilegedConfiguredNetworks extends MethodHook {
         /**
@@ -151,6 +223,9 @@ public class IWifiManagerProxy extends BinderInvocationStub {
                 if (slice != null) {
                     return slice;
                 }
+                // R4 audit 2026-10-05 (R4-10): fail closed to null, never the
+                // real privileged networks.
+                return null;
             }
             return method.invoke(who, args);
         }
@@ -181,6 +256,8 @@ public class IWifiManagerProxy extends BinderInvocationStub {
                     if (slice != null) {
                         return slice;
                     }
+                    // R4 audit 2026-10-05 (R4-10): fail closed to null.
+                    return null;
                 } else {
                     return new ArrayList<>();
                 }

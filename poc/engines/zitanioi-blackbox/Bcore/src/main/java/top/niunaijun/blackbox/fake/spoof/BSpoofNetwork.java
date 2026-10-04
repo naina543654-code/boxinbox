@@ -65,6 +65,7 @@ public final class BSpoofNetwork {
             hookLinkProperties();
             hookNetworkInfo();
             hookInterfaceEnumeration();
+            hookNetworkCallbacks();
             sInstalled = true;
             Slog.d(TAG, "ConnectivityManager VPN-hiding hooks installed");
         }
@@ -280,6 +281,148 @@ public final class BSpoofNetwork {
         if (!sSanitizeWarned) {
             sSanitizeWarned = true;
             Slog.w(TAG, where + ": sanitize reflection failed (fail-open)", t);
+        }
+    }
+
+    /**
+     * R4 audit 2026-10-05 (R4-27): {@code registerNetworkCallback} /
+     * {@code registerDefaultNetworkCallback} passed the guest's callback
+     * through unwrapped, so {@code onCapabilitiesChanged} delivered the real
+     * {@code NetworkCapabilities} with {@code TRANSPORT_VPN} — a callback-path
+     * bypass of the sync VPN-hiding. Wraps the guest callback in a
+     * sanitizing delegate: capabilities get the VPN transport stripped and
+     * link properties get the tunnel interface renamed, using the same
+     * helpers as the sync hooks. All other callbacks forward untouched.
+     * Fail-open: any failure leaves the original callback in place.
+     */
+    private static void hookNetworkCallbacks() {
+        try {
+            Pine.hook(ConnectivityManager.class.getDeclaredMethod(
+                    "registerNetworkCallback",
+                    android.net.NetworkRequest.class,
+                    ConnectivityManager.NetworkCallback.class),
+                    new MethodHook() {
+                        @Override
+                        public void beforeCall(Pine.CallFrame callFrame) {
+                            wrapCallbackArg(callFrame, 1);
+                        }
+                    });
+        } catch (Throwable t) {
+            Slog.e(TAG, "Pine hook on registerNetworkCallback failed", t);
+        }
+        try {
+            Pine.hook(ConnectivityManager.class.getDeclaredMethod(
+                    "registerNetworkCallback",
+                    android.net.NetworkRequest.class,
+                    ConnectivityManager.NetworkCallback.class,
+                    android.os.Handler.class),
+                    new MethodHook() {
+                        @Override
+                        public void beforeCall(Pine.CallFrame callFrame) {
+                            wrapCallbackArg(callFrame, 1);
+                        }
+                    });
+        } catch (Throwable t) {
+            Slog.e(TAG, "Pine hook on registerNetworkCallback(Handler) failed", t);
+        }
+        try {
+            Pine.hook(ConnectivityManager.class.getDeclaredMethod(
+                    "registerDefaultNetworkCallback",
+                    ConnectivityManager.NetworkCallback.class),
+                    new MethodHook() {
+                        @Override
+                        public void beforeCall(Pine.CallFrame callFrame) {
+                            wrapCallbackArg(callFrame, 0);
+                        }
+                    });
+        } catch (Throwable t) {
+            Slog.e(TAG, "Pine hook on registerDefaultNetworkCallback failed", t);
+        }
+        try {
+            Pine.hook(ConnectivityManager.class.getDeclaredMethod(
+                    "registerDefaultNetworkCallback",
+                    ConnectivityManager.NetworkCallback.class,
+                    android.os.Handler.class),
+                    new MethodHook() {
+                        @Override
+                        public void beforeCall(Pine.CallFrame callFrame) {
+                            wrapCallbackArg(callFrame, 0);
+                        }
+                    });
+        } catch (Throwable t) {
+            Slog.e(TAG, "Pine hook on registerDefaultNetworkCallback(Handler) failed", t);
+        }
+    }
+
+    /** Replaces the NetworkCallback arg with a sanitizing wrapper when active. */
+    private static void wrapCallbackArg(Pine.CallFrame callFrame, int index) {
+        try {
+            BSpoofManager spoof = BSpoofManager.get();
+            if (spoof == null || !spoof.isSpoofActive()) {
+                return;
+            }
+            Object[] args = callFrame.args;
+            if (args == null || index >= args.length
+                    || !(args[index] instanceof ConnectivityManager.NetworkCallback)) {
+                return;
+            }
+            ConnectivityManager.NetworkCallback orig =
+                    (ConnectivityManager.NetworkCallback) args[index];
+            if (orig instanceof SanitizingCallback) {
+                return; // already wrapped
+            }
+            args[index] = new SanitizingCallback(orig);
+        } catch (Throwable t) {
+            warnOnce("wrapCallbackArg", t);
+        }
+    }
+
+    /** Forwards every callback to the guest's original, sanitizing the VPN tell. */
+    private static final class SanitizingCallback
+            extends ConnectivityManager.NetworkCallback {
+        private final ConnectivityManager.NetworkCallback delegate;
+
+        SanitizingCallback(ConnectivityManager.NetworkCallback delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void onAvailable(Network network) {
+            delegate.onAvailable(network);
+        }
+
+        @Override
+        public void onLosing(Network network, int maxMsToLive) {
+            delegate.onLosing(network, maxMsToLive);
+        }
+
+        @Override
+        public void onLost(Network network) {
+            delegate.onLost(network);
+        }
+
+        @Override
+        public void onUnavailable() {
+            delegate.onUnavailable();
+        }
+
+        @Override
+        public void onCapabilitiesChanged(Network network,
+                                          NetworkCapabilities networkCapabilities) {
+            stripVpnTransport(networkCapabilities);
+            delegate.onCapabilitiesChanged(network, networkCapabilities);
+        }
+
+        @Override
+        public void onLinkPropertiesChanged(Network network,
+                                           LinkProperties linkProperties) {
+            hideTunnelInterface(linkProperties);
+            delegate.onLinkPropertiesChanged(network, linkProperties);
+        }
+
+        @Override
+        public void onBlockedStatusChanged(Network network, boolean blocked) {
+            delegate.onBlockedStatusChanged(network, blocked);
         }
     }
 }

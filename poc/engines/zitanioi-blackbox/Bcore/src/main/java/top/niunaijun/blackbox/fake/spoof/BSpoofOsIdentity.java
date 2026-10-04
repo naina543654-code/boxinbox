@@ -246,7 +246,8 @@ public final class BSpoofOsIdentity {
      * {@code IDeviceIdentifiersPolicyProxy}, but hooking the public API
      * directly closes any framework-internal bypass. Fail-closed: the
      * per-identity serial when active, null when inactive (a null serial
-     * is plausible; the real hardware serial is a permanent link).
+     * is plausible; the real hardware serial is a permanent cross-identity
+     * link — R4 2026-10-05: the code now matches this comment).
      */
     private static void hookBuildSerial() {
         try {
@@ -256,6 +257,9 @@ public final class BSpoofOsIdentity {
                         public void beforeCall(Pine.CallFrame callFrame) {
                             BSpoofManager spoof = BSpoofManager.get();
                             if (spoof == null || !spoof.isSpoofActive()) {
+                                // R4: fail closed — never the real hardware
+                                // serial, even outside an active identity.
+                                callFrame.setResult(null);
                                 return;
                             }
                             String serial = spoof.getSerial();

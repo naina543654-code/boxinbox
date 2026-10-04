@@ -138,6 +138,41 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
     }
 
     /**
+     * R4 audit 2026-10-05 (R4-4): {@code getDeviceSoftwareVersionForSlot} is
+     * reachable via the public {@code TelephonyManager.getDeviceSoftwareVersion()}
+     * and returns the IMEI/SV software version (stable per device). The
+     * IPhoneSubInfo twin is hooked to null — this ITelephony twin must match.
+     */
+    @ProxyMethod("getDeviceSoftwareVersionForSlot")
+    public static class GetDeviceSoftwareVersionForSlot extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            if (BSpoofManager.get().isSpoofActive()) {
+                return null;
+            }
+            return method.invoke(who, args);
+        }
+    }
+
+    /**
+     * R4 audit 2026-10-05 (R4-5): {@code getServiceStateForSubscriber} returns
+     * a ServiceState carrying operator numeric/alpha and roaming state via
+     * direct binder. The public path is Pine-covered; the binder path must
+     * not leak the real one. Null when active (no service state is a
+     * plausible guest-visible state); passthrough when inactive.
+     */
+    @ProxyMethod("getServiceStateForSubscriber")
+    public static class GetServiceStateForSubscriber extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            if (BSpoofManager.get().isSpoofActive()) {
+                return null;
+            }
+            return method.invoke(who, args);
+        }
+    }
+
+    /**
      * R3 audit 2026-10-05: merged-subscription IMSI arrays — stable
      * cross-identity links via direct binder. Null = no merged
      * subscriptions, the normal state.
@@ -229,109 +264,52 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
     }
 
     /**
-     * Track B: operator numeric (MCC+MNC) from the spoof profile when active.
-     * Covers both the legacy AIDL name (pre-API 30) and the ForPhone variant
-     * (API 30+): the proxy matches hooks by interface method name, and on
-     * API 30+ TelephonyManager.getNetworkOperator() calls
-     * getNetworkOperatorForPhone, so the legacy-only hook silently never fired.
-     * Inactive profile -> pass through to the real implementation.
+     * R4 audit 2026-10-05: one-shot cell-info refresh requests. When a spoof
+     * profile is active the guest must not trigger (or receive, via the
+     * listen() path also filtered in R4) real cell updates — no-op, mirroring
+     * the empty-list semantics of getAllCellInfo.
      */
-    @ProxyMethods({"getNetworkOperator", "getNetworkOperatorForPhone"})
-    public static class GetNetworkOperator extends MethodHook {
+    @ProxyMethods({"requestCellInfoUpdate", "requestCellInfoUpdateWithWorkSource"})
+    public static class RequestCellInfoUpdate extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            Log.d(TAG, "getNetworkOperator");
-            BSpoofManager spoof = BSpoofManager.get();
-            boolean active = spoof.isSpoofActive();
-            if (active && spoof.getOperatorNumeric() != null) {
-                Log.d(TAG, "getNetworkOperator: spoofed=" + spoof.getOperatorNumeric());
-                return spoof.getOperatorNumeric();
+            if (BSpoofManager.get().isSpoofActive()) {
+                return null;
             }
-            Log.d(TAG, "getNetworkOperator: passthrough (spoofActive=" + active + ")");
             return method.invoke(who, args);
         }
     }
 
     /**
-     * Track B: operator / SIM / country identity overrides from the spoof profile.
-     * Inactive profile -> pass through to the real implementation (unchanged engine
-     * behavior for these getters).
+     * R4 audit 2026-10-05 (R4-3): the operator/country binder hooks below were
+     * DELETED. On API 33/34 these values never traverse the ITelephony binder:
+     * TelephonyManager.getNetworkOperator() → getNetworkOperatorForPhone() →
+     * client-side sysprop read of gsm.operator.numeric (same shape for the
+     * alpha/SIM variants: gsm.operator.alpha, gsm.sim.operator.numeric/
+     * alpha/iso-country). The binder names ({@code getNetworkOperator},
+     * {@code getNetworkOperatorForPhone}, {@code getNetworkOperatorName}(+ForPhone),
+     * {@code getSimOperator}(+ForPhone), {@code getSimOperatorName}(+ForPhone),
+     * {@code getSimCountryIso}(+ForPhone), {@code getNetworkCountryIso})
+     * never fired — inert registrations that created a false impression of
+     * binder-level defense in depth. The real coverage is the Pine hooks on
+     * the TelephonyManager getters (BTelephonyApiSpoof) plus the getprop
+     * interception table (BSpoofSystemProps), both verified present.
      *
-     * <p>Each hook registers both the legacy AIDL name and the API 30+
-     * ForPhone/ForSubscriber variant: see {@link #GetNetworkOperator} for why.
-     * Variant names that do not exist on the device's ITelephony are inert.
+     * <p>EXCEPTION: {@code getNetworkCountryIsoForPhone(int)} IS a real binder
+     * method (ITelephony.aidl; TM.java calls it) — that hook is live and
+     * kept below for direct-binder callers.
      */
-    @ProxyMethods({"getNetworkOperatorName", "getNetworkOperatorNameForPhone"})
-    public static class GetNetworkOperatorName extends MethodHook {
-        @Override
-        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            BSpoofManager spoof = BSpoofManager.get();
-            boolean active = spoof.isSpoofActive();
-            if (active && spoof.getOperatorName() != null) {
-                Log.d(TAG, "getNetworkOperatorName: spoofed=" + spoof.getOperatorName());
-                return spoof.getOperatorName();
-            }
-            Log.d(TAG, "getNetworkOperatorName: passthrough (spoofActive=" + active + ")");
-            return method.invoke(who, args);
-        }
-    }
-
-    @ProxyMethods({"getSimOperator", "getSimOperatorForPhone"})
-    public static class GetSimOperator extends MethodHook {
-        @Override
-        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            BSpoofManager spoof = BSpoofManager.get();
-            boolean active = spoof.isSpoofActive();
-            if (active && spoof.getOperatorNumeric() != null) {
-                Log.d(TAG, "getSimOperator: spoofed=" + spoof.getOperatorNumeric());
-                return spoof.getOperatorNumeric();
-            }
-            Log.d(TAG, "getSimOperator: passthrough (spoofActive=" + active + ")");
-            return method.invoke(who, args);
-        }
-    }
-
-    @ProxyMethods({"getSimOperatorName", "getSimOperatorNameForPhone"})
-    public static class GetSimOperatorName extends MethodHook {
-        @Override
-        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            BSpoofManager spoof = BSpoofManager.get();
-            boolean active = spoof.isSpoofActive();
-            if (active && spoof.getOperatorName() != null) {
-                Log.d(TAG, "getSimOperatorName: spoofed=" + spoof.getOperatorName());
-                return spoof.getOperatorName();
-            }
-            Log.d(TAG, "getSimOperatorName: passthrough (spoofActive=" + active + ")");
-            return method.invoke(who, args);
-        }
-    }
-
-    @ProxyMethods({"getSimCountryIso", "getSimCountryIsoForPhone"})
-    public static class GetSimCountryIso extends MethodHook {
+    @ProxyMethod("getNetworkCountryIsoForPhone")
+    public static class GetNetworkCountryIsoForPhone extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             BSpoofManager spoof = BSpoofManager.get();
             boolean active = spoof.isSpoofActive();
             if (active && spoof.getCountryIso() != null) {
-                Log.d(TAG, "getSimCountryIso: spoofed=" + spoof.getCountryIso());
+                Log.d(TAG, "getNetworkCountryIsoForPhone: spoofed=" + spoof.getCountryIso());
                 return spoof.getCountryIso();
             }
-            Log.d(TAG, "getSimCountryIso: passthrough (spoofActive=" + active + ")");
-            return method.invoke(who, args);
-        }
-    }
-
-    @ProxyMethods({"getNetworkCountryIso", "getNetworkCountryIsoForPhone"})
-    public static class GetNetworkCountryIso extends MethodHook {
-        @Override
-        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            BSpoofManager spoof = BSpoofManager.get();
-            boolean active = spoof.isSpoofActive();
-            if (active && spoof.getCountryIso() != null) {
-                Log.d(TAG, "getNetworkCountryIso: spoofed=" + spoof.getCountryIso());
-                return spoof.getCountryIso();
-            }
-            Log.d(TAG, "getNetworkCountryIso: passthrough (spoofActive=" + active + ")");
+            Log.d(TAG, "getNetworkCountryIsoForPhone: passthrough (spoofActive=" + active + ")");
             return method.invoke(who, args);
         }
     }

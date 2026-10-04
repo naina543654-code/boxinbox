@@ -128,9 +128,42 @@ public class SystemProviderStub extends ClassInvocationStub implements BContentP
                         return true;
                     }
                 }
+            } else if (arg instanceof Bundle) {
+                // R4 audit 2026-10-05: on API 30+ ContentResolver.query packs
+                // selection/selectionArgs into the queryArgs Bundle
+                // (android:query-arg-sql-selection[-args]) — the key is visible
+                // only inside the Bundle.
+                if (bundleSelectsKey((Bundle) arg, Settings.Secure.ANDROID_ID)) {
+                    return true;
+                }
             }
         }
         return false;
+    }
+
+    /**
+     * Checks whether a queryArgs Bundle selects the given Settings key,
+     * either via selection-args (`name=?`, args {@code [key]}) or a raw
+     * selection string containing the key.
+     */
+    private static boolean bundleSelectsKey(Bundle b, String key) {
+        if (b == null || key == null) {
+            return false;
+        }
+        // Literals: ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS
+        // ("android:query-arg-sql-selection-args") and QUERY_ARG_SQL_SELECTION
+        // ("android:query-arg-sql-selection") — stable framework strings.
+        String[] selArgs =
+                b.getStringArray("android:query-arg-sql-selection-args");
+        if (selArgs != null) {
+            for (String s : selArgs) {
+                if (key.equals(s)) {
+                    return true;
+                }
+            }
+        }
+        String selection = b.getString("android:query-arg-sql-selection");
+        return selection != null && selection.contains(key);
     }
 
     /**
@@ -192,11 +225,12 @@ public class SystemProviderStub extends ClassInvocationStub implements BContentP
      * <p>R3 audit 2026-10-05: interception is at the {@code IContentProvider}
      * level, not {@code ContentProvider} — the old code read {@code args[1]}
      * (the Uri) as the projection, so the branch never fired. The arg layout
-     * differs by API: {@code query(AttributionSource, Uri, String[],
-     * Bundle, ...)} on API 31+, {@code query(String, String, Uri, String[],
-     * Bundle, ...)} on API 30. Instead of hardcoding indices, anchor on the
-     * Uri: the projection is the {@code String[]} right after it, and on
-     * API 30+ the projection may instead live inside the following
+     * differs by API: {@code query(AttributionSource, Uri, String[], Bundle,
+     * ...)} on API 31+, {@code query(String callingPkg, Uri, String[],
+     * Bundle, ...)} on API 30 (R4 2026-10-05: the single leading String is
+     * the calling package, not two Strings). Instead of hardcoding indices,
+     * anchor on the Uri: the projection is the {@code String[]} right after
+     * it, and on API 30+ the projection may instead live inside the following
      * {@code queryArgs} Bundle under
      * {@code ContentResolver.QUERY_ARG_SQL_PROJECTION}.
      */
@@ -245,6 +279,15 @@ public class SystemProviderStub extends ClassInvocationStub implements BContentP
                     if ("adb_enabled".equals(s) || "development_settings_enabled".equals(s)) {
                         return s;
                     }
+                }
+            } else if (arg instanceof Bundle) {
+                // R4 audit 2026-10-05: same Bundle-bypass as the Android-ID
+                // path — API 30+ query() carries the selection in the Bundle.
+                if (bundleSelectsKey((Bundle) arg, "adb_enabled")) {
+                    return "adb_enabled";
+                }
+                if (bundleSelectsKey((Bundle) arg, "development_settings_enabled")) {
+                    return "development_settings_enabled";
                 }
             }
         }

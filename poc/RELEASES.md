@@ -62,7 +62,7 @@ see `poc/SPOOFING_MATRIX.md` for the verification matrix.
   - Matrix doc corrections: fixed malformed row 77, corrected the SIM-serial
     and inactive-fallback rows, added the saved-networks row, refreshed the
     file map, documented the new Pine hooks.
-  - 7 new ProbeV2 rows for the R3 surfaces: `telephony.simOperator`,
+  - 8 new ProbeV2 row instances for the R3 surfaces: `telephony.simOperator`,
     `telephony.simOperatorName`, `telephony.simCountryIso`,
     `telephony.nai` (PASS-on-null), `telephony.submgrPhoneNumber`,
     `mediadrm.systemId`, `sysprop.ro.boot.serialno`, `build.radioVersion`.

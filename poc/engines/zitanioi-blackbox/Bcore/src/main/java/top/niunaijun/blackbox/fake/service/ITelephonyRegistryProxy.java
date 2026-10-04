@@ -43,6 +43,13 @@ public class ITelephonyRegistryProxy extends BinderInvocationStub {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             MethodParameterUtils.replaceFirstAppPkg(args);
+            // R4 audit 2026-10-05: the sync cell paths are emptied when a
+            // spoof profile is active, but the async listen() path delivered
+            // real towers. Strip the cell bits from the event mask so the
+            // guest never receives cell callbacks. Layout:
+            // listenForSubscriber(int subId, String pkg, IPhoneStateListener,
+            //                     int events, boolean notifyNow).
+            stripCellListenBits(args, 3);
             return method.invoke(who, args);
         }
     }
@@ -53,7 +60,33 @@ public class ITelephonyRegistryProxy extends BinderInvocationStub {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             MethodParameterUtils.replaceFirstAppPkg(args);
+            // R4 audit 2026-10-05: same cell-callback blackout as above.
+            // Layout: listen(String pkg, IPhoneStateListener, int events,
+            //               boolean notifyNow).
+            stripCellListenBits(args, 2);
             return method.invoke(who, args);
+        }
+    }
+
+    /**
+     * Clears {@code LISTEN_CELL_INFO} / {@code LISTEN_CELL_LOCATION} from the
+     * event-mask int at {@code eventsIndex} when a spoof profile is active.
+     * Literals: {@code PhoneStateListener.LISTEN_CELL_INFO} (0x400) and
+     * {@code LISTEN_CELL_LOCATION} (0x10) — stable framework constants.
+     */
+    private static void stripCellListenBits(Object[] args, int eventsIndex) {
+        try {
+            if (!top.niunaijun.blackbox.fake.spoof.BSpoofManager.get().isSpoofActive()) {
+                return;
+            }
+            if (args != null && eventsIndex < args.length
+                    && args[eventsIndex] instanceof Integer) {
+                int events = (Integer) args[eventsIndex];
+                args[eventsIndex] = events & ~(0x400 | 0x10);
+            }
+        } catch (Throwable ignored) {
+            // Never break telephony for a filtering failure — worst case the
+            // original mask is delivered, same as pre-R4 behavior.
         }
     }
 }
