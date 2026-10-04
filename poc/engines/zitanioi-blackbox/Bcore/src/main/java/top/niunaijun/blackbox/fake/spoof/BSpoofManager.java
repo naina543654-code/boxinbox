@@ -628,6 +628,17 @@ public class BSpoofManager {
             } catch (Throwable t) {
                 Slog.w(TAG, "ensureLoaded: BProcFsSpoof failed (fail-open)", t);
             }
+            // Re-audit 2026-10-04 (N11): Build static fields are patched once
+            // per process at HookManager init. If this load replaced a stale
+            // profile (generation invalidation), the statics still held the
+            // OLD identity's values — re-patch them from the fresh profile.
+            // applyBuildSpoofing() is idempotent and no-ops without an active
+            // profile, so it is safe to call on every load.
+            try {
+                applyBuildSpoofing();
+            } catch (Throwable t) {
+                Slog.w(TAG, "ensureLoaded: applyBuildSpoofing failed", t);
+            }
         } catch (Throwable t) {
             Slog.w(TAG, "ensureLoaded: failed to parse spoof profile — spoofing inactive (will retry)", t);
             mSpoofActive = false;

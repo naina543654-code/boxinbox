@@ -52,7 +52,145 @@ public class IPhoneSubInfoProxy extends ClassInvocationStub {
     public static class getLine1NumberForSubscriber extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            // Re-audit 2026-10-04 (N12): was returning null while
+            // getMsisdnForSubscriber returned the per-identity number — an
+            // incoherent pair on direct-binder reads (a spoofing tell).
+            // Line 1 IS the MSISDN: serve the same per-identity value.
+            BSpoofManager spoof = BSpoofManager.get();
+            if (spoof.isSpoofActive() && spoof.getPhoneNumber() != null) {
+                return spoof.getPhoneNumber();
+            }
             return null;
+        }
+    }
+
+    /**
+     * Re-audit 2026-10-04 (N6): the bare (non-subscriber) AIDL variants were
+     * unhooked — reachable via direct binder reflection even though the
+     * public TelephonyManager APIs are Pine-covered. All names verified
+     * against AOSP android14-release IPhoneSubInfo.aidl.
+     */
+    @ProxyMethod("getLine1Number")
+    public static class getLine1Number extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            BSpoofManager spoof = BSpoofManager.get();
+            if (spoof.isSpoofActive() && spoof.getPhoneNumber() != null) {
+                return spoof.getPhoneNumber();
+            }
+            return null;
+        }
+    }
+
+    @ProxyMethod("getMsisdn")
+    public static class getMsisdn extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            BSpoofManager spoof = BSpoofManager.get();
+            if (spoof.isSpoofActive() && spoof.getPhoneNumber() != null) {
+                return spoof.getPhoneNumber();
+            }
+            return null;
+        }
+    }
+
+    @ProxyMethod("getVoiceMailNumber")
+    public static class getVoiceMailNumber extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            BSpoofManager spoof = BSpoofManager.get();
+            if (spoof.isSpoofActive() && spoof.getPhoneNumber() != null) {
+                return spoof.getPhoneNumber();
+            }
+            return null;
+        }
+    }
+
+    @ProxyMethod("getDeviceIdWithFeature")
+    public static class getDeviceIdWithFeature extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return spoofedOrLegacyDeviceId();
+        }
+    }
+
+    @ProxyMethod("getSubscriberIdWithFeature")
+    public static class getSubscriberIdWithFeature extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return spoofedOrLegacySubscriberId();
+        }
+    }
+
+    @ProxyMethod("getIccSerialNumberWithFeature")
+    public static class getIccSerialNumberWithFeature extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            BSpoofManager spoof = BSpoofManager.get();
+            if (spoof.isSpoofActive() && spoof.getSimSerial() != null) {
+                return spoof.getSimSerial();
+            }
+            return null;
+        }
+    }
+
+    @ProxyMethod("getNaiForSubscriber")
+    public static class getNaiForSubscriber extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            // SIM-derived Network Access Identifier — stable cross-identity
+            // link; no per-identity NAI exists. Fail closed to null.
+            return null;
+        }
+    }
+
+    @ProxyMethod("getGroupIdLevel1ForSubscriber")
+    public static class getGroupIdLevel1ForSubscriber extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            // GID1 is a stable SIM group identifier — fail closed to null.
+            return null;
+        }
+    }
+
+    @ProxyMethod("getLine1AlphaTag")
+    public static class getLine1AlphaTag extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return null;
+        }
+    }
+
+    @ProxyMethod("getLine1AlphaTagForSubscriber")
+    public static class getLine1AlphaTagForSubscriber extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return null;
+        }
+    }
+
+    @ProxyMethod("getVoiceMailAlphaTag")
+    public static class getVoiceMailAlphaTag extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return null;
+        }
+    }
+
+    @ProxyMethod("getVoiceMailAlphaTagForSubscriber")
+    public static class getVoiceMailAlphaTagForSubscriber extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return null;
+        }
+    }
+
+    @ProxyMethod("getDeviceSvnUsingSubId")
+    public static class getDeviceSvnUsingSubId extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            // Device software version (IMEI/SV) — stable device identifier.
+            return spoofedOrLegacyDeviceId();
         }
     }
 

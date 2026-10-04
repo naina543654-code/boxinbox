@@ -110,6 +110,25 @@ public class IWifiManagerProxy extends BinderInvocationStub {
         }
     }
 
+    @ProxyMethod("getPasspointConfigurations")
+    public static class GetPasspointConfigurations extends MethodHook {
+        /**
+         * Re-audit 2026-10-04 (N10): saved Passpoint (Hotspot 2.0) profiles
+         * identify the user as strongly as saved SSIDs — a fresh identity
+         * has none. Empty list when active; inactive profile -> pass through.
+         * (Unlike getConfiguredNetworks, this AIDL declares a plain List,
+         * so no ParceledListSlice wrapping is needed.)
+         */
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            if (BSpoofManager.get().isSpoofActive()) {
+                Log.d(TAG, "getPasspointConfigurations: spoofed -> empty");
+                return new ArrayList<>();
+            }
+            return method.invoke(who, args);
+        }
+    }
+
     @ProxyMethod("getConnectionInfo")
     public static class GetConnectionInfo extends MethodHook {
         /*

@@ -80,6 +80,11 @@ public final class BTelephonyApiSpoof {
                 // per-identity number, fail closed to null when inactive.
                 hookStringGetter("getVoiceMailNumber", new Class<?>[0], ValueKind.PHONE_NUMBER);
                 hookStringGetter("getVoiceMailNumber", new Class<?>[]{int.class}, ValueKind.PHONE_NUMBER);
+                // Re-audit 2026-10-04 (N8): getNai() returns a SIM-derived
+                // Network Access Identifier — stable across identities,
+                // READ_PHONE_STATE-gated. No per-identity NAI in the profile;
+                // fail closed to null.
+                hookStringGetter("getNai", new Class<?>[0], ValueKind.NULL_ALWAYS);
                 sInstalled = true;
                 Slog.d(TAG, "TelephonyManager operator API hooks installed");
             } catch (Throwable t) {
@@ -128,7 +133,7 @@ public final class BTelephonyApiSpoof {
 
     /** Which per-identity profile value a hooked string getter serves. */
     private enum ValueKind {
-        SUBSCRIBER_ID, SIM_SERIAL, DEVICE_ID, PHONE_NUMBER
+        SUBSCRIBER_ID, SIM_SERIAL, DEVICE_ID, PHONE_NUMBER, NULL_ALWAYS
     }
 
     /**
@@ -170,6 +175,11 @@ public final class BTelephonyApiSpoof {
                             if (spoof.isSpoofActive()) {
                                 value = spoof.getPhoneNumber();
                             }
+                            failClosedNull = true;
+                            break;
+                        case NULL_ALWAYS:
+                            // No per-identity value exists; the real value is
+                            // a stable cross-identity link, so always null.
                             failClosedNull = true;
                             break;
                         case DEVICE_ID:

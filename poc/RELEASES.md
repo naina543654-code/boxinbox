@@ -11,6 +11,32 @@ see `poc/SPOOFING_MATRIX.md` for the verification matrix.
 
 ## Unreleased (on `main` since `poc-v2.2`)
 
+- Re-audit 2 residual batch (2026-10-04): closes the 7 remaining re-audit
+  findings (N6/N8/N9/N10/N11/N12 + Advertising-ID claim correction).
+  - MEDIUM: `TelephonyManager.getNai()` Pine-hooked → always null (new
+    `ValueKind.NULL_ALWAYS`; SIM-derived NAI is a stable cross-identity
+    link with no per-identity profile value).
+  - MEDIUM: `IWifiManagerProxy.getPasspointConfigurations` hooked → empty
+    list when active (saved Passpoint profiles identify like saved SSIDs;
+    AIDL declares a plain `List`, so no slice wrapping needed).
+  - MEDIUM: `IPhoneSubInfo` direct-binder residuals closed — added
+    `getNaiForSubscriber`, `getGroupIdLevel1ForSubscriber` (GID1),
+    `getDeviceSvnUsingSubId`, `getLine1AlphaTag`/`getVoiceMailAlphaTag`
+    (+`ForSubscriber` variants), and the bare `getLine1Number` /
+    `getMsisdn` / `getVoiceMailNumber` / `getDeviceIdWithFeature` /
+    `getSubscriberIdWithFeature` / `getIccSerialNumberWithFeature`
+    (all names verified against AOSP android14-release IPhoneSubInfo.aidl).
+  - LOW: `getLine1NumberForSubscriber` now serves the per-identity MSISDN
+    like `getMsisdnForSubscriber` (was null — an incoherent tell pair).
+  - LOW: `BSubscriptionSpoof` returns a mutable `ArrayList` instead of
+    `Collections.emptyList()` (a mutating caller would crash with
+    `UnsupportedOperationException`).
+  - LOW-MEDIUM: `BSpoofManager` re-applies the `android.os.Build` static
+    field patches after a profile-generation invalidation (a surviving
+    guest process previously kept the OLD identity's Build statics).
+  - Matrix correction: Advertising ID demoted Supported → Partial — the
+    raw GMS `IAdvertisingIdService` binder path is unhooked (client-library
+    path is spoofed); closing it needs bindService interception, deferred.
 - Re-audit 2 fix batch (2026-10-04, sources TBD — second full code audit,
   `files/CODE-AUDIT-R2-2026-10-04.md`: 58 OK / 4 partial / 1 broken of
   63 matrix rows; 22/26 batch items verified, 4 flawed; 0 regressions).

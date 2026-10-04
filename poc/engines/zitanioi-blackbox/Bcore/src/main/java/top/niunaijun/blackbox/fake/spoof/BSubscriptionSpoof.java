@@ -4,7 +4,7 @@ import android.telephony.SubscriptionInfo;
 import android.telephony.SubscriptionManager;
 
 import java.lang.reflect.Method;
-import java.util.Collections;
+import java.util.ArrayList;
 
 import top.canyie.pine.Pine;
 import top.canyie.pine.callback.MethodHook;
@@ -100,7 +100,11 @@ public final class BSubscriptionSpoof {
                 @Override
                 public void beforeCall(Pine.CallFrame callFrame) {
                     // Fail closed: never expose the real subscription state.
-                    callFrame.setResult(list ? Collections.emptyList() : null);
+                    // Re-audit 2026-10-04 (N9): a mutable ArrayList, not
+                    // Collections.emptyList() — a caller that mutates the
+                    // result would get UnsupportedOperationException
+                    // (guest crash + a spoofing tell).
+                    callFrame.setResult(list ? new ArrayList<>() : null);
                 }
             });
         } catch (Throwable t) {
