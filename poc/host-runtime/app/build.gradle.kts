@@ -21,8 +21,11 @@ android {
         applicationId = "com.sandboxpoc.hostruntime"
         minSdk = 33
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0-poc-runtime-$buildSha"
+        // Human-readable release series (bump manually per release: 1.1, 1.2, ...).
+        // Exact build identity (git SHA + date) lives in the version.xml footer
+        // string below, not in versionName.
+        versionCode = 2
+        versionName = "1.1"
     }
 
     buildTypes {
