@@ -27,11 +27,11 @@ android {
 
     sourceSets {
         getByName("main") {
-            // srcDir (singular) APPENDS the generated dir to src/main/res.
-            // srcDirs (plural) would REPLACE it, silently dropping the icon,
-            // and every other packaged resource (caused the 2026-10-05
-            // missing-icon/missing-footer episode on Jason's Gradle build).
-            res.srcDir("$buildDir/generated/versionRes")
+            // Explicitly list BOTH res dirs: the default src/main/res plus the
+            // generated versionRes. (A bare srcDir/srcDirs call here proved
+            // unreliable across AGP/Gradle versions — 2026-10-05 the icon
+            // silently dropped from Jason's Gradle APK twice.)
+            res.srcDirs("src/main/res", "$buildDir/generated/versionRes")
         }
     }
 
