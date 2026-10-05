@@ -132,7 +132,10 @@ s_apk() {  # assemble + native libs + zipalign + sign + verify
     fi
   done
   find lib -name "*.so"
-  zip -q -r "$MB/unsigned.apk" .
+  # resources.arsc must be stored UNCOMPRESSED for API 30+ (install fails
+  # with INSTALL_PARSE_FAILED_NOT_APK otherwise). -n skips compression for
+  # it; zipalign -p 4 then ensures the 4-byte alignment.
+  zip -q -r -n resources.arsc "$MB/unsigned.apk" .
   cd "$MB"
   "$BT/zipalign" -f -p 4 unsigned.apk aligned.apk
   [ -f "$HR/poc-host-runtime-debug.keystore" ] || \
