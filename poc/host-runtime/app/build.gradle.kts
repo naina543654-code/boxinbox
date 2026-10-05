@@ -25,16 +25,6 @@ android {
         versionName = "1.0-poc-runtime-$buildSha"
     }
 
-    sourceSets {
-        getByName("main") {
-            // Explicitly list BOTH res dirs: the default src/main/res plus the
-            // generated versionRes. (A bare srcDir/srcDirs call here proved
-            // unreliable across AGP/Gradle versions — 2026-10-05 the icon
-            // silently dropped from Jason's Gradle APK twice.)
-            res.srcDirs("src/main/res", "$buildDir/generated/versionRes")
-        }
-    }
-
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -51,17 +41,21 @@ android {
     }
 }
 
+// Build stamp: version.xml is written directly into src/main/res/values
+// (gitignored — see .gitignore). Earlier revisions used a sourceSets hack to
+// add a generated res dir; it silently dropped src/main/res on Jason's Gradle
+// builds (missing icon, 2026-10-05). Direct write is bulletproof.
 val generateVersionRes by tasks.registering {
-    val outDir = layout.buildDirectory.dir("generated/versionRes/values")
+    val outFile = layout.projectDirectory.file("src/main/res/values/version.xml")
     // Declare the stamp as inputs: without them Gradle's up-to-date check
     // skips this task after the first build and the footer keeps showing
     // the PREVIOUS checkout's SHA (versionName stays fresh, footer stale).
     inputs.property("buildSha", buildSha)
     inputs.property("buildDate", buildDate)
-    outputs.dir(outDir)
+    outputs.file(outFile)
     doLast {
-        outDir.get().asFile.mkdirs()
-        outDir.get().asFile.resolve("version.xml").writeText(
+        outFile.asFile.parentFile.mkdirs()
+        outFile.asFile.writeText(
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n" +
             "    <string name=\"build_version\">$buildSha ($buildDate)</string>\n</resources>\n"
         )
